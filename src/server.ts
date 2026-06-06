@@ -821,4 +821,5 @@ app.get("/lancamentos", async (req, res) => {
 
 app.listen(port, () => {
     console.log("servidor roddndo na porta: " + port)
+    console.log("DATABASE_URL:", process.env.DATABASE_URL);
 })
