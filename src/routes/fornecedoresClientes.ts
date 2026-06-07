@@ -20,13 +20,20 @@ router.get("/", async (req, res) => {
 });
 
 // POST /fornecedores-clientes
+// POST /fornecedores-clientes
 router.post("/", async (req, res) => {
     try {
-        const { nome } = req.body;
+        const { nome, saldo } = req.body;
 
         if (!nome || nome.trim() === "") {
             return res.status(400).json({
                 message: "O nome é obrigatório",
+            });
+        }
+
+        if (saldo !== undefined && saldo !== "" && isNaN(parseFloat(saldo))) {
+            return res.status(400).json({
+                message: "O saldo deve ser um número válido",
             });
         }
 
@@ -42,9 +49,13 @@ router.post("/", async (req, res) => {
             });
         }
 
-        const fornecedorCliente = await prisma.fornecedorCliente.create({
-            data: { nome: nomeFormatado },
-        });
+        const data: any = { nome: nomeFormatado };
+
+        if (saldo !== undefined && saldo !== "") {
+            data.saldo = String(parseFloat(saldo));
+        }
+
+        const fornecedorCliente = await prisma.fornecedorCliente.create({ data });
 
         return res.status(201).json({
             message: "Fornecedor/cliente criado com sucesso",
@@ -62,7 +73,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     try {
         const id = Number(req.params.id);
-        const { nome, ativo } = req.body;
+        const { nome, ativo, saldo } = req.body;
 
         if (!id || isNaN(id)) {
             return res.status(400).json({
@@ -109,6 +120,15 @@ router.put("/:id", async (req, res) => {
 
         if (ativo !== undefined) {
             data.ativo = Boolean(ativo);
+        }
+
+        if (saldo !== undefined && saldo !== "") {
+            if (isNaN(parseFloat(saldo))) {
+                return res.status(400).json({
+                    message: "O saldo deve ser um número válido",
+                });
+            }
+            data.saldo = String(parseFloat(saldo));
         }
 
         const fornecedorClienteAtualizado = await prisma.fornecedorCliente.update({
