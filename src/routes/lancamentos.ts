@@ -129,4 +129,61 @@ router.post("/", async (req, res) => {
     }
 });
 
+// GET /lancamentos/cliente/:id
+router.get("/cliente/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const lancamentos = await prisma.lancamento.findMany({
+            where: {
+                fornecedorClienteId: Number(id),
+            },
+            include: {
+                fornecedorCliente: {
+                    select: {
+                        id: true,
+                        nome: true,
+                        saldo: true,
+                    },
+                },
+                conta: {
+                    select: {
+                        id: true,
+                        nome: true,
+                    },
+                },
+                classificacao: {
+                    select: {
+                        id: true,
+                        nome: true,
+                    },
+                },
+                categoria: {
+                    select: {
+                        id: true,
+                        nome: true,
+                    },
+                },
+            },
+            orderBy: [
+                { dataLancamento: "desc" },
+                { id: "desc" },
+            ],
+        });
+
+        if (lancamentos.length === 0) {
+            return res.status(404).json({
+                message: "Nenhum lançamento encontrado para este cliente",
+            });
+        }
+
+        return res.status(200).json(lancamentos);
+    } catch (error) {
+        return res.status(500).json({
+            message: "Erro ao buscar lançamentos do cliente",
+            error,
+        });
+    }
+});
+
 export default router;
