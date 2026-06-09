@@ -3,6 +3,193 @@ import { prisma } from "../../lib/prisma.js";
 
 const router = Router();
 
+// GET /lancamentos/filtros?clienteId=1&contaId=2&categoriaId=3&tipo=ENTRADA|SAIDA|TODOS
+router.get("/filtros", async (req, res) => {
+    try {
+        const {
+            clienteId,
+            contaId,
+            categoriaId,
+            tipo,
+        } = req.query;
+
+        const where: any = {};
+
+        if (clienteId !== undefined && clienteId !== "") {
+            if (isNaN(Number(clienteId))) {
+                return res.status(400).json({
+                    message: "ID do cliente inválido",
+                });
+            }
+
+            where.fornecedorClienteId = Number(clienteId);
+        }
+
+        if (contaId !== undefined && contaId !== "") {
+            if (isNaN(Number(contaId))) {
+                return res.status(400).json({
+                    message: "ID da conta inválido",
+                });
+            }
+
+            where.contaId = Number(contaId);
+        }
+
+        if (categoriaId !== undefined && categoriaId !== "") {
+            if (isNaN(Number(categoriaId))) {
+                return res.status(400).json({
+                    message: "ID da categoria inválido",
+                });
+            }
+
+            where.categoriaId = Number(categoriaId);
+        }
+
+        if (tipo !== undefined && tipo !== "") {
+            const tipoFiltro = String(tipo).toUpperCase();
+
+            if (!["TODOS", "ENTRADA", "SAIDA"].includes(tipoFiltro)) {
+                return res.status(400).json({
+                    message: "Tipo inválido. Use TODOS, ENTRADA ou SAIDA",
+                });
+            }
+
+            if (tipoFiltro !== "TODOS") {
+                where.tipo = tipoFiltro;
+            }
+        }
+
+        const lancamentos = await prisma.lancamento.findMany({
+            where,
+            select: {
+                id: true,
+                dataLancamento: true,
+                tipo: true,
+                valor: true,
+                classificacao: true,
+                observacao: true,
+
+                fornecedorCliente: {
+                    select: {
+                        id: true,
+                        nome: true,
+                        saldo: true,
+                    },
+                },
+
+                conta: {
+                    select: {
+                        id: true,
+                        nome: true,
+                    },
+                },
+
+                categoria: {
+                    select: {
+                        id: true,
+                        nome: true,
+                    },
+                },
+            },
+            orderBy: [
+                { dataLancamento: "desc" },
+                { id: "desc" },
+            ],
+        });
+
+        const totalEntradas = await prisma.lancamento.aggregate({
+            where: {
+                ...where,
+                tipo: "ENTRADA",
+            },
+            _sum: {
+                valor: true,
+            },
+        });
+
+        const totalSaidas = await prisma.lancamento.aggregate({
+            where: {
+                ...where,
+                tipo: "SAIDA",
+            },
+            _sum: {
+                valor: true,
+            },
+        });
+
+        return res.status(200).json({
+            filtros: {
+                clienteId: clienteId ? Number(clienteId) : null,
+                contaId: contaId ? Number(contaId) : null,
+                categoriaId: categoriaId ? Number(categoriaId) : null,
+                tipo: tipo ? String(tipo).toUpperCase() : "TODOS",
+            },
+            resumo: {
+                totalRegistros: lancamentos.length,
+                totalEntradas: Number(totalEntradas._sum.valor || 0),
+                totalSaidas: Number(totalSaidas._sum.valor || 0),
+                saldoCalculado:
+                    Number(totalEntradas._sum.valor || 0) -
+                    Number(totalSaidas._sum.valor || 0),
+            },
+            lancamentos,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            message: "Erro ao filtrar lançamentos",
+            error: error instanceof Error ? error.message : error,
+        });
+    }
+});
+
+// GET /lancamentos/resumo
+router.get("/resumo", async (req, res) => {
+    try {
+        const totalEntradas = await prisma.lancamento.aggregate({
+            where: {
+                tipo: "ENTRADA",
+            },
+            _sum: {
+                valor: true,
+            },
+            _count: {
+                id: true,
+            },
+        });
+
+        const totalSaidas = await prisma.lancamento.aggregate({
+            where: {
+                tipo: "SAIDA",
+            },
+            _sum: {
+                valor: true,
+            },
+            _count: {
+                id: true,
+            },
+        });
+
+        const entradas = Number(totalEntradas._sum.valor || 0);
+        const saidas = Number(totalSaidas._sum.valor || 0);
+
+        return res.status(200).json({
+            resumo: {
+                totalEntradas: entradas,
+                totalSaidas: saidas,
+                saldoFinal: entradas - saidas,
+                quantidadeEntradas: totalEntradas._count.id,
+                quantidadeSaidas: totalSaidas._count.id,
+                totalRegistros:
+                    totalEntradas._count.id + totalSaidas._count.id,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({
+            message: "Erro ao buscar resumo dos lançamentos",
+            error: error instanceof Error ? error.message : error,
+        });
+    }
+});
 // GET /lancamentos
 router.get("/", async (req, res) => {
     try {
@@ -16,12 +203,6 @@ router.get("/", async (req, res) => {
                     },
                 },
                 conta: {
-                    select: {
-                        id: true,
-                        nome: true,
-                    },
-                },
-                classificacao: {
                     select: {
                         id: true,
                         nome: true,
@@ -58,7 +239,7 @@ router.post("/", async (req, res) => {
             tipo,
             valor,
             contaId,
-            classificacaoId,
+            classificacao,
             categoriaId,
             observacao,
         } = req.body;
@@ -103,7 +284,7 @@ router.post("/", async (req, res) => {
                     tipo,
                     valor,
                     contaId: contaId ? Number(contaId) : null,
-                    classificacaoId: classificacaoId ? Number(classificacaoId) : null,
+                    classificacao: classificacao ? classificacao.trim() : null,
                     categoriaId: categoriaId ? Number(categoriaId) : null,
                     observacao,
                 },
@@ -129,59 +310,59 @@ router.post("/", async (req, res) => {
     }
 });
 
-// GET /lancamentos/cliente/:id
-router.get("/cliente/:id", async (req, res) => {
+// DELETE /lancamentos/:id
+router.delete("/:id", async (req, res) => {
     try {
         const { id } = req.params;
 
-        const lancamentos = await prisma.lancamento.findMany({
-            where: {
-                fornecedorClienteId: Number(id),
-            },
-            include: {
-                fornecedorCliente: {
-                    select: {
-                        id: true,
-                        nome: true,
-                        saldo: true,
-                    },
-                },
-                conta: {
-                    select: {
-                        id: true,
-                        nome: true,
-                    },
-                },
-                classificacao: {
-                    select: {
-                        id: true,
-                        nome: true,
-                    },
-                },
-                categoria: {
-                    select: {
-                        id: true,
-                        nome: true,
-                    },
-                },
-            },
-            orderBy: [
-                { dataLancamento: "desc" },
-                { id: "desc" },
-            ],
+        const resultado = await prisma.$transaction(async (tx) => {
+            const lancamento = await tx.lancamento.findUnique({
+                where: { id: Number(id) },
+            });
+
+            if (!lancamento) {
+                throw new Error("Lançamento não encontrado");
+            }
+
+            const fornecedorCliente = await tx.fornecedorCliente.findUnique({
+                where: { id: lancamento.fornecedorClienteId },
+            });
+
+            if (!fornecedorCliente) {
+                throw new Error("Fornecedor/cliente não encontrado");
+            }
+
+            const saldoAtual = Number(fornecedorCliente.saldo);
+
+            // Ao deletar, desfaz o efeito do lançamento no saldo
+            const novoSaldo =
+                lancamento.tipo === "ENTRADA"
+                    ? saldoAtual - Number(lancamento.valor)
+                    : saldoAtual + Number(lancamento.valor);
+
+            const lancamentoDeletado = await tx.lancamento.delete({
+                where: { id: Number(id) },
+            });
+
+            const fornecedorClienteAtualizado = await tx.fornecedorCliente.update({
+                where: { id: lancamento.fornecedorClienteId },
+                data: { saldo: novoSaldo },
+            });
+
+            return {
+                lancamento: lancamentoDeletado,
+                fornecedorCliente: fornecedorClienteAtualizado,
+            };
         });
 
-        if (lancamentos.length === 0) {
-            return res.status(404).json({
-                message: "Nenhum lançamento encontrado para este cliente",
-            });
-        }
-
-        return res.status(200).json(lancamentos);
+        return res.status(200).json({
+            message: "Lançamento deletado com sucesso",
+            ...resultado,
+        });
     } catch (error) {
         return res.status(500).json({
-            message: "Erro ao buscar lançamentos do cliente",
-            error,
+            message: "Erro ao deletar lançamento",
+            error: error instanceof Error ? error.message : error,
         });
     }
 });
@@ -340,61 +521,127 @@ router.patch("/:id", async (req, res) => {
     }
 });
 
-// DELETE /lancamentos/:id
-router.delete("/:id", async (req, res) => {
-    try {
-        const { id } = req.params;
+// // GET /lancamentos/cliente/:id?tipo=TODOS | ENTRADA | SAIDA
+// router.get("/cliente/:id", async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const { tipo } = req.query;
 
-        const resultado = await prisma.$transaction(async (tx) => {
-            const lancamento = await tx.lancamento.findUnique({
-                where: { id: Number(id) },
-            });
+//         if (!id || isNaN(Number(id))) {
+//             return res.status(400).json({
+//                 message: "ID do fornecedor/cliente inválido",
+//             });
+//         }
 
-            if (!lancamento) {
-                throw new Error("Lançamento não encontrado");
-            }
+//         const tipoFiltro = tipo ? String(tipo).toUpperCase() : "TODOS";
 
-            const fornecedorCliente = await tx.fornecedorCliente.findUnique({
-                where: { id: lancamento.fornecedorClienteId },
-            });
+//         if (!["TODOS", "ENTRADA", "SAIDA"].includes(tipoFiltro)) {
+//             return res.status(400).json({
+//                 message: "Filtro inválido. Use TODOS, ENTRADA ou SAIDA",
+//             });
+//         }
 
-            if (!fornecedorCliente) {
-                throw new Error("Fornecedor/cliente não encontrado");
-            }
+//         const fornecedorCliente = await prisma.fornecedorCliente.findUnique({
+//             where: {
+//                 id: Number(id),
+//             },
+//             select: {
+//                 id: true,
+//                 nome: true,
+//                 saldo: true,
+//             },
+//         });
 
-            const saldoAtual = Number(fornecedorCliente.saldo);
+//         if (!fornecedorCliente) {
+//             return res.status(404).json({
+//                 message: "Fornecedor/cliente não encontrado",
+//             });
+//         }
 
-            // Ao deletar, desfaz o efeito do lançamento no saldo
-            const novoSaldo =
-                lancamento.tipo === "ENTRADA"
-                    ? saldoAtual - Number(lancamento.valor)
-                    : saldoAtual + Number(lancamento.valor);
+//         const where: any = {
+//             fornecedorClienteId: Number(id),
+//         };
 
-            const lancamentoDeletado = await tx.lancamento.delete({
-                where: { id: Number(id) },
-            });
+//         if (tipoFiltro !== "TODOS") {
+//             where.tipo = tipoFiltro;
+//         }
 
-            const fornecedorClienteAtualizado = await tx.fornecedorCliente.update({
-                where: { id: lancamento.fornecedorClienteId },
-                data: { saldo: novoSaldo },
-            });
+//         const lancamentos = await prisma.lancamento.findMany({
+//             where,
+//             select: {
+//                 id: true,
+//                 dataLancamento: true,
+//                 tipo: true,
+//                 valor: true,
+//                 classificacao: true,
+//                 observacao: true,
 
-            return {
-                lancamento: lancamentoDeletado,
-                fornecedorCliente: fornecedorClienteAtualizado,
-            };
-        });
+//                 fornecedorCliente: {
+//                     select: {
+//                         id: true,
+//                         nome: true,
+//                         saldo: true,
+//                     },
+//                 },
 
-        return res.status(200).json({
-            message: "Lançamento deletado com sucesso",
-            ...resultado,
-        });
-    } catch (error) {
-        return res.status(500).json({
-            message: "Erro ao deletar lançamento",
-            error: error instanceof Error ? error.message : error,
-        });
-    }
-});
+//                 conta: {
+//                     select: {
+//                         id: true,
+//                         nome: true,
+//                     },
+//                 },
 
+//                 categoria: {
+//                     select: {
+//                         id: true,
+//                         nome: true,
+//                     },
+//                 },
+//             },
+//             orderBy: [
+//                 { dataLancamento: "desc" },
+//                 { id: "desc" },
+//             ],
+//         });
+
+//         const totalEntradas = await prisma.lancamento.aggregate({
+//             where: {
+//                 fornecedorClienteId: Number(id),
+//                 tipo: "ENTRADA",
+//             },
+//             _sum: {
+//                 valor: true,
+//             },
+//         });
+
+//         const totalSaidas = await prisma.lancamento.aggregate({
+//             where: {
+//                 fornecedorClienteId: Number(id),
+//                 tipo: "SAIDA",
+//             },
+//             _sum: {
+//                 valor: true,
+//             },
+//         });
+
+//         return res.status(200).json({
+//             fornecedorCliente,
+//             filtro: tipoFiltro,
+//             resumo: {
+//                 totalRegistros: lancamentos.length,
+//                 totalEntradas: Number(totalEntradas._sum.valor || 0),
+//                 totalSaidas: Number(totalSaidas._sum.valor || 0),
+//                 saldoCalculado:
+//                     Number(totalEntradas._sum.valor || 0) -
+//                     Number(totalSaidas._sum.valor || 0),
+//             },
+//             lancamentos,
+//         });
+//     } catch (error) {
+//         return res.status(500).json({
+//             message: "Erro ao buscar lançamentos do cliente",
+//             error: error instanceof Error ? error.message : error,
+//         });
+//     }
+// });
 export default router;
