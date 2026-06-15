@@ -16,11 +16,6 @@ router.get("/", async (req, res) => {
             },
         });
 
-        if (categorias.length === 0) {
-            return res.status(404).json({
-                message: "Nenhuma categoria cadastrada",
-            });
-        }
 
         return res.status(200).json(categorias);
     } catch (error) {
