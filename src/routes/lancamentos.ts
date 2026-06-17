@@ -378,7 +378,7 @@ router.patch("/:id", async (req, res) => {
             tipo,
             valor,
             contaId,
-            classificacaoId,
+            classificacao,
             categoriaId,
             observacao,
         } = req.body;
@@ -479,9 +479,9 @@ router.patch("/:id", async (req, res) => {
                 dadosAtualizacao.contaId = contaId === null ? null : Number(contaId);
             }
 
-            if (classificacaoId !== undefined) {
-                dadosAtualizacao.classificacaoId =
-                    classificacaoId === null ? null : Number(classificacaoId);
+            if (classificacao !== undefined) {
+                dadosAtualizacao.classificacao =
+                    classificacao === null ? null : classificacao.trim() || null;
             }
 
             if (categoriaId !== undefined) {
