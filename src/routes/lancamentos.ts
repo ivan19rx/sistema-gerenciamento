@@ -1,47 +1,42 @@
 import { Router } from "express";
 import { prisma } from "../../lib/prisma.js";
+import { getEmpresaId } from "../auth/middleware.js";
 
 const router = Router();
 
 // GET /lancamentos/filtros?clienteId=1&contaId=2&categoriaId=3&tipo=ENTRADA|SAIDA|TODOS
 router.get("/filtros", async (req, res) => {
     try {
-        const {
-            clienteId,
-            contaId,
-            categoriaId,
-            tipo,
-        } = req.query;
+        const empresaId = getEmpresaId(req);
+        const { clienteId, contaId, categoriaId, tipo } = req.query;
 
-        const where: any = {};
+        // sempre escopado à empresa resolvida
+        const where: any = { empresaId };
 
         if (clienteId !== undefined && clienteId !== "") {
             if (isNaN(Number(clienteId))) {
-                return res.status(400).json({
-                    message: "ID do cliente inválido",
-                });
+                return res
+                    .status(400)
+                    .json({ message: "ID do cliente inválido" });
             }
-
             where.fornecedorClienteId = Number(clienteId);
         }
 
         if (contaId !== undefined && contaId !== "") {
             if (isNaN(Number(contaId))) {
-                return res.status(400).json({
-                    message: "ID da conta inválido",
-                });
+                return res
+                    .status(400)
+                    .json({ message: "ID da conta inválido" });
             }
-
             where.contaId = Number(contaId);
         }
 
         if (categoriaId !== undefined && categoriaId !== "") {
             if (isNaN(Number(categoriaId))) {
-                return res.status(400).json({
-                    message: "ID da categoria inválido",
-                });
+                return res
+                    .status(400)
+                    .json({ message: "ID da categoria inválido" });
             }
-
             where.categoriaId = Number(categoriaId);
         }
 
@@ -59,63 +54,33 @@ router.get("/filtros", async (req, res) => {
             }
         }
 
-        const lancamentos = await prisma.lancamento.findMany({
-            where,
-            select: {
-                id: true,
-                dataLancamento: true,
-                tipo: true,
-                valor: true,
-                classificacao: true,
-                observacao: true,
-
-                fornecedorCliente: {
-                    select: {
-                        id: true,
-                        nome: true,
-                        saldo: true,
+        const [lancamentos, totalEntradas, totalSaidas] = await Promise.all([
+            prisma.lancamento.findMany({
+                where,
+                select: {
+                    id: true,
+                    dataLancamento: true,
+                    tipo: true,
+                    valor: true,
+                    classificacao: true,
+                    observacao: true,
+                    fornecedorCliente: {
+                        select: { id: true, nome: true, saldo: true },
                     },
+                    conta: { select: { id: true, nome: true } },
+                    categoria: { select: { id: true, nome: true } },
                 },
-
-                conta: {
-                    select: {
-                        id: true,
-                        nome: true,
-                    },
-                },
-
-                categoria: {
-                    select: {
-                        id: true,
-                        nome: true,
-                    },
-                },
-            },
-            orderBy: [
-                { dataLancamento: "desc" },
-                { id: "desc" },
-            ],
-        });
-
-        const totalEntradas = await prisma.lancamento.aggregate({
-            where: {
-                ...where,
-                tipo: "ENTRADA",
-            },
-            _sum: {
-                valor: true,
-            },
-        });
-
-        const totalSaidas = await prisma.lancamento.aggregate({
-            where: {
-                ...where,
-                tipo: "SAIDA",
-            },
-            _sum: {
-                valor: true,
-            },
-        });
+                orderBy: [{ dataLancamento: "desc" }, { id: "desc" }],
+            }),
+            prisma.lancamento.aggregate({
+                where: { ...where, tipo: "ENTRADA" },
+                _sum: { valor: true },
+            }),
+            prisma.lancamento.aggregate({
+                where: { ...where, tipo: "SAIDA" },
+                _sum: { valor: true },
+            }),
+        ]);
 
         return res.status(200).json({
             filtros: {
@@ -135,39 +100,29 @@ router.get("/filtros", async (req, res) => {
             lancamentos,
         });
     } catch (error) {
-        return res.status(500).json({
-            message: "Erro ao filtrar lançamentos",
-            error: error instanceof Error ? error.message : error,
-        });
+        return res
+            .status(500)
+            .json({ message: "Erro ao filtrar lançamentos" });
     }
 });
 
 // GET /lancamentos/resumo
 router.get("/resumo", async (req, res) => {
     try {
-        const totalEntradas = await prisma.lancamento.aggregate({
-            where: {
-                tipo: "ENTRADA",
-            },
-            _sum: {
-                valor: true,
-            },
-            _count: {
-                id: true,
-            },
-        });
+        const empresaId = getEmpresaId(req);
 
-        const totalSaidas = await prisma.lancamento.aggregate({
-            where: {
-                tipo: "SAIDA",
-            },
-            _sum: {
-                valor: true,
-            },
-            _count: {
-                id: true,
-            },
-        });
+        const [totalEntradas, totalSaidas] = await Promise.all([
+            prisma.lancamento.aggregate({
+                where: { empresaId, tipo: "ENTRADA" },
+                _sum: { valor: true },
+                _count: { id: true },
+            }),
+            prisma.lancamento.aggregate({
+                where: { empresaId, tipo: "SAIDA" },
+                _sum: { valor: true },
+                _count: { id: true },
+            }),
+        ]);
 
         const entradas = Number(totalEntradas._sum.valor || 0);
         const saidas = Number(totalSaidas._sum.valor || 0);
@@ -186,53 +141,37 @@ router.get("/resumo", async (req, res) => {
     } catch (error) {
         return res.status(500).json({
             message: "Erro ao buscar resumo dos lançamentos",
-            error: error instanceof Error ? error.message : error,
         });
     }
 });
+
 // GET /lancamentos
 router.get("/", async (req, res) => {
     try {
+        const empresaId = getEmpresaId(req);
+
         const lancamentos = await prisma.lancamento.findMany({
+            where: { empresaId },
             include: {
                 fornecedorCliente: {
-                    select: {
-                        id: true,
-                        nome: true,
-                        saldo: true,
-                    },
+                    select: { id: true, nome: true, saldo: true },
                 },
-                conta: {
-                    select: {
-                        id: true,
-                        nome: true,
-                    },
-                },
-                categoria: {
-                    select: {
-                        id: true,
-                        nome: true,
-                    },
-                },
+                conta: { select: { id: true, nome: true } },
+                categoria: { select: { id: true, nome: true } },
             },
-            orderBy: [
-                { dataLancamento: "desc" },
-                { id: "desc" },
-            ],
+            orderBy: [{ dataLancamento: "desc" }, { id: "desc" }],
         });
 
         return res.status(200).json(lancamentos);
     } catch (error) {
-        return res.status(500).json({
-            message: "Erro ao buscar lançamentos",
-            error,
-        });
+        return res.status(500).json({ message: "Erro ao buscar lançamentos" });
     }
 });
 
 // POST /lancamentos
 router.post("/", async (req, res) => {
     try {
+        const empresaId = getEmpresaId(req);
         const {
             dataLancamento,
             fornecedorClienteId,
@@ -248,7 +187,7 @@ router.post("/", async (req, res) => {
             !dataLancamento ||
             !fornecedorClienteId ||
             !tipo ||
-            !valor ||
+            valor === undefined ||
             !contaId ||
             !categoriaId
         ) {
@@ -259,24 +198,43 @@ router.post("/", async (req, res) => {
         }
 
         if (!["ENTRADA", "SAIDA"].includes(tipo)) {
-            return res.status(400).json({
-                message: "Tipo inválido. Use ENTRADA ou SAIDA",
-            });
+            return res
+                .status(400)
+                .json({ message: "Tipo inválido. Use ENTRADA ou SAIDA" });
         }
 
-        if (Number(valor) <= 0) {
-            return res.status(400).json({
-                message: "O valor deve ser maior que zero",
-            });
+        if (isNaN(Number(valor)) || Number(valor) <= 0) {
+            return res
+                .status(400)
+                .json({ message: "O valor deve ser um número maior que zero" });
+        }
+
+        const data = new Date(dataLancamento);
+        if (isNaN(data.getTime())) {
+            return res.status(400).json({ message: "Data inválida" });
         }
 
         const resultado = await prisma.$transaction(async (tx) => {
-            const fornecedorCliente = await tx.fornecedorCliente.findUnique({
-                where: { id: Number(fornecedorClienteId) },
+            // todas as entidades referenciadas têm que pertencer à mesma empresa
+            const fornecedorCliente = await tx.fornecedorCliente.findFirst({
+                where: { id: Number(fornecedorClienteId), empresaId },
             });
-
             if (!fornecedorCliente) {
                 throw new Error("Fornecedor/cliente não encontrado");
+            }
+
+            const conta = await tx.conta.findFirst({
+                where: { id: Number(contaId), empresaId },
+            });
+            if (!conta) {
+                throw new Error("Conta não encontrada");
+            }
+
+            const categoria = await tx.categoria.findFirst({
+                where: { id: Number(categoriaId), empresaId },
+            });
+            if (!categoria) {
+                throw new Error("Categoria não encontrada");
             }
 
             const saldoAtual = Number(fornecedorCliente.saldo);
@@ -287,23 +245,30 @@ router.post("/", async (req, res) => {
 
             const lancamento = await tx.lancamento.create({
                 data: {
-                    dataLancamento: new Date(dataLancamento),
+                    dataLancamento: data,
+                    empresaId,
                     fornecedorClienteId: Number(fornecedorClienteId),
                     tipo,
-                    valor,
+                    valor: Number(valor),
                     contaId: Number(contaId),
-                    classificacao: classificacao ? classificacao.trim() : null,
+                    classificacao: classificacao
+                        ? String(classificacao).trim()
+                        : null,
                     categoriaId: Number(categoriaId),
-                    observacao,
+                    observacao: observacao ?? null,
                 },
             });
 
-            const fornecedorClienteAtualizado = await tx.fornecedorCliente.update({
-                where: { id: Number(fornecedorClienteId) },
-                data: { saldo: novoSaldo },
-            });
+            const fornecedorClienteAtualizado =
+                await tx.fornecedorCliente.update({
+                    where: { id: Number(fornecedorClienteId) },
+                    data: { saldo: novoSaldo },
+                });
 
-            return { lancamento, fornecedorCliente: fornecedorClienteAtualizado };
+            return {
+                lancamento,
+                fornecedorCliente: fornecedorClienteAtualizado,
+            };
         });
 
         return res.status(201).json({
@@ -311,51 +276,58 @@ router.post("/", async (req, res) => {
             ...resultado,
         });
     } catch (error) {
-        return res.status(500).json({
-            message: "Erro ao criar lançamento",
-            error: error instanceof Error ? error.message : error,
-        });
+        const msg = error instanceof Error ? error.message : "";
+        if (
+            msg.includes("não encontrad") // fornecedor/conta/categoria
+        ) {
+            return res.status(404).json({ message: msg });
+        }
+        return res.status(500).json({ message: "Erro ao criar lançamento" });
     }
 });
 
 // DELETE /lancamentos/:id
 router.delete("/:id", async (req, res) => {
     try {
-        const { id } = req.params;
+        const empresaId = getEmpresaId(req);
+        const id = Number(req.params.id);
+
+        if (!id || isNaN(id)) {
+            return res.status(400).json({ message: "ID inválido" });
+        }
 
         const resultado = await prisma.$transaction(async (tx) => {
-            const lancamento = await tx.lancamento.findUnique({
-                where: { id: Number(id) },
+            const lancamento = await tx.lancamento.findFirst({
+                where: { id, empresaId },
             });
-
             if (!lancamento) {
                 throw new Error("Lançamento não encontrado");
             }
 
-            const fornecedorCliente = await tx.fornecedorCliente.findUnique({
-                where: { id: lancamento.fornecedorClienteId },
+            const fornecedorCliente = await tx.fornecedorCliente.findFirst({
+                where: { id: lancamento.fornecedorClienteId, empresaId },
             });
-
             if (!fornecedorCliente) {
                 throw new Error("Fornecedor/cliente não encontrado");
             }
 
             const saldoAtual = Number(fornecedorCliente.saldo);
 
-            // Ao deletar, desfaz o efeito do lançamento no saldo
+            // ao deletar, desfaz o efeito do lançamento no saldo
             const novoSaldo =
                 lancamento.tipo === "ENTRADA"
                     ? saldoAtual - Number(lancamento.valor)
                     : saldoAtual + Number(lancamento.valor);
 
             const lancamentoDeletado = await tx.lancamento.delete({
-                where: { id: Number(id) },
+                where: { id },
             });
 
-            const fornecedorClienteAtualizado = await tx.fornecedorCliente.update({
-                where: { id: lancamento.fornecedorClienteId },
-                data: { saldo: novoSaldo },
-            });
+            const fornecedorClienteAtualizado =
+                await tx.fornecedorCliente.update({
+                    where: { id: lancamento.fornecedorClienteId },
+                    data: { saldo: novoSaldo },
+                });
 
             return {
                 lancamento: lancamentoDeletado,
@@ -368,17 +340,19 @@ router.delete("/:id", async (req, res) => {
             ...resultado,
         });
     } catch (error) {
-        return res.status(500).json({
-            message: "Erro ao deletar lançamento",
-            error: error instanceof Error ? error.message : error,
-        });
+        const msg = error instanceof Error ? error.message : "";
+        if (msg.includes("não encontrad")) {
+            return res.status(404).json({ message: msg });
+        }
+        return res.status(500).json({ message: "Erro ao deletar lançamento" });
     }
 });
 
 // PATCH /lancamentos/:id
 router.patch("/:id", async (req, res) => {
     try {
-        const { id } = req.params;
+        const empresaId = getEmpresaId(req);
+        const id = Number(req.params.id);
 
         const {
             dataLancamento,
@@ -391,22 +365,23 @@ router.patch("/:id", async (req, res) => {
             observacao,
         } = req.body;
 
-        if (!id || isNaN(Number(id))) {
-            return res.status(400).json({
-                message: "ID inválido",
-            });
+        if (!id || isNaN(id)) {
+            return res.status(400).json({ message: "ID inválido" });
         }
 
         if (tipo !== undefined && !["ENTRADA", "SAIDA"].includes(tipo)) {
-            return res.status(400).json({
-                message: "Tipo inválido. Use ENTRADA ou SAIDA",
-            });
+            return res
+                .status(400)
+                .json({ message: "Tipo inválido. Use ENTRADA ou SAIDA" });
         }
 
-        if (valor !== undefined && Number(valor) <= 0) {
-            return res.status(400).json({
-                message: "O valor deve ser maior que zero",
-            });
+        if (
+            valor !== undefined &&
+            (isNaN(Number(valor)) || Number(valor) <= 0)
+        ) {
+            return res
+                .status(400)
+                .json({ message: "O valor deve ser um número maior que zero" });
         }
 
         if (
@@ -420,32 +395,40 @@ router.patch("/:id", async (req, res) => {
 
         if (
             categoriaId !== undefined &&
-            (categoriaId === null || categoriaId === "" || isNaN(Number(categoriaId)))
+            (categoriaId === null ||
+                categoriaId === "" ||
+                isNaN(Number(categoriaId)))
         ) {
             return res.status(400).json({
                 message: "Categoria inválida. A categoria é obrigatória",
             });
         }
 
-        const resultado = await prisma.$transaction(async (tx) => {
-            const lancamentoAtual = await tx.lancamento.findUnique({
-                where: { id: Number(id) },
-            });
+        let dataConvertida: Date | undefined;
+        if (dataLancamento !== undefined) {
+            dataConvertida = new Date(dataLancamento);
+            if (isNaN(dataConvertida.getTime())) {
+                return res.status(400).json({ message: "Data inválida" });
+            }
+        }
 
+        const resultado = await prisma.$transaction(async (tx) => {
+            const lancamentoAtual = await tx.lancamento.findFirst({
+                where: { id, empresaId },
+            });
             if (!lancamentoAtual) {
                 throw new Error("Lançamento não encontrado");
             }
 
-            const fornecedorAntigo = await tx.fornecedorCliente.findUnique({
-                where: { id: lancamentoAtual.fornecedorClienteId },
+            const fornecedorAntigo = await tx.fornecedorCliente.findFirst({
+                where: { id: lancamentoAtual.fornecedorClienteId, empresaId },
             });
-
             if (!fornecedorAntigo) {
                 throw new Error("Fornecedor/cliente antigo não encontrado");
             }
 
+            // 1) desfaz o efeito do lançamento atual no saldo do fornecedor antigo
             const saldoAntigoAtual = Number(fornecedorAntigo.saldo);
-
             const saldoSemLancamentoAntigo =
                 lancamentoAtual.tipo === "ENTRADA"
                     ? saldoAntigoAtual - Number(lancamentoAtual.valor)
@@ -461,22 +444,46 @@ router.patch("/:id", async (req, res) => {
                     ? Number(fornecedorClienteId)
                     : lancamentoAtual.fornecedorClienteId;
 
-            const novoTipo = tipo !== undefined ? tipo : lancamentoAtual.tipo;
+            const novoTipo =
+                tipo !== undefined ? tipo : lancamentoAtual.tipo;
 
             const novoValor =
                 valor !== undefined
                     ? Number(valor)
                     : Number(lancamentoAtual.valor);
 
-            const fornecedorNovo = await tx.fornecedorCliente.findUnique({
-                where: { id: novoFornecedorClienteId },
+            // valida propriedade das novas referências (todas da mesma empresa)
+            const fornecedorNovo = await tx.fornecedorCliente.findFirst({
+                where: { id: novoFornecedorClienteId, empresaId },
             });
-
             if (!fornecedorNovo) {
                 throw new Error("Novo fornecedor/cliente não encontrado");
             }
 
-            const saldoNovoAtual = Number(fornecedorNovo.saldo);
+            if (contaId !== undefined) {
+                const conta = await tx.conta.findFirst({
+                    where: { id: Number(contaId), empresaId },
+                });
+                if (!conta) {
+                    throw new Error("Conta não encontrada");
+                }
+            }
+
+            if (categoriaId !== undefined) {
+                const categoria = await tx.categoria.findFirst({
+                    where: { id: Number(categoriaId), empresaId },
+                });
+                if (!categoria) {
+                    throw new Error("Categoria não encontrada");
+                }
+            }
+
+            // 2) aplica o efeito do lançamento novo no saldo do fornecedor novo.
+            // Relê o saldo (pode ter sido alterado no passo 1, se for o mesmo).
+            const fornecedorNovoAtual = await tx.fornecedorCliente.findFirst({
+                where: { id: novoFornecedorClienteId, empresaId },
+            });
+            const saldoNovoAtual = Number(fornecedorNovoAtual!.saldo);
 
             const novoSaldo =
                 novoTipo === "ENTRADA"
@@ -485,48 +492,44 @@ router.patch("/:id", async (req, res) => {
 
             const dadosAtualizacao: any = {};
 
-            if (dataLancamento !== undefined) {
-                dadosAtualizacao.dataLancamento = new Date(dataLancamento);
+            if (dataConvertida !== undefined) {
+                dadosAtualizacao.dataLancamento = dataConvertida;
             }
-
             if (fornecedorClienteId !== undefined) {
-                dadosAtualizacao.fornecedorClienteId = Number(fornecedorClienteId);
+                dadosAtualizacao.fornecedorClienteId = novoFornecedorClienteId;
             }
-
             if (tipo !== undefined) {
                 dadosAtualizacao.tipo = tipo;
             }
-
             if (valor !== undefined) {
                 dadosAtualizacao.valor = Number(valor);
             }
-
             if (contaId !== undefined) {
                 dadosAtualizacao.contaId = Number(contaId);
             }
-
             if (classificacao !== undefined) {
                 dadosAtualizacao.classificacao =
-                    classificacao === null ? null : classificacao.trim() || null;
+                    classificacao === null
+                        ? null
+                        : String(classificacao).trim() || null;
             }
-
             if (categoriaId !== undefined) {
                 dadosAtualizacao.categoriaId = Number(categoriaId);
             }
-
             if (observacao !== undefined) {
                 dadosAtualizacao.observacao = observacao;
             }
 
             const lancamentoAtualizado = await tx.lancamento.update({
-                where: { id: Number(id) },
+                where: { id },
                 data: dadosAtualizacao,
             });
 
-            const fornecedorClienteAtualizado = await tx.fornecedorCliente.update({
-                where: { id: novoFornecedorClienteId },
-                data: { saldo: novoSaldo },
-            });
+            const fornecedorClienteAtualizado =
+                await tx.fornecedorCliente.update({
+                    where: { id: novoFornecedorClienteId },
+                    data: { saldo: novoSaldo },
+                });
 
             return {
                 lancamento: lancamentoAtualizado,
@@ -539,134 +542,14 @@ router.patch("/:id", async (req, res) => {
             ...resultado,
         });
     } catch (error) {
-        return res.status(500).json({
-            message: "Erro ao atualizar lançamento",
-            error: error instanceof Error ? error.message : error,
-        });
+        const msg = error instanceof Error ? error.message : "";
+        if (msg.includes("não encontrad")) {
+            return res.status(404).json({ message: msg });
+        }
+        return res
+            .status(500)
+            .json({ message: "Erro ao atualizar lançamento" });
     }
 });
 
-// // GET /lancamentos/cliente/:id?tipo=TODOS | ENTRADA | SAIDA
-// router.get("/cliente/:id", async (req, res) => {
-//     try {
-//         const { id } = req.params;
-//         const { tipo } = req.query;
-
-//         if (!id || isNaN(Number(id))) {
-//             return res.status(400).json({
-//                 message: "ID do fornecedor/cliente inválido",
-//             });
-//         }
-
-//         const tipoFiltro = tipo ? String(tipo).toUpperCase() : "TODOS";
-
-//         if (!["TODOS", "ENTRADA", "SAIDA"].includes(tipoFiltro)) {
-//             return res.status(400).json({
-//                 message: "Filtro inválido. Use TODOS, ENTRADA ou SAIDA",
-//             });
-//         }
-
-//         const fornecedorCliente = await prisma.fornecedorCliente.findUnique({
-//             where: {
-//                 id: Number(id),
-//             },
-//             select: {
-//                 id: true,
-//                 nome: true,
-//                 saldo: true,
-//             },
-//         });
-
-//         if (!fornecedorCliente) {
-//             return res.status(404).json({
-//                 message: "Fornecedor/cliente não encontrado",
-//             });
-//         }
-
-//         const where: any = {
-//             fornecedorClienteId: Number(id),
-//         };
-
-//         if (tipoFiltro !== "TODOS") {
-//             where.tipo = tipoFiltro;
-//         }
-
-//         const lancamentos = await prisma.lancamento.findMany({
-//             where,
-//             select: {
-//                 id: true,
-//                 dataLancamento: true,
-//                 tipo: true,
-//                 valor: true,
-//                 classificacao: true,
-//                 observacao: true,
-
-//                 fornecedorCliente: {
-//                     select: {
-//                         id: true,
-//                         nome: true,
-//                         saldo: true,
-//                     },
-//                 },
-
-//                 conta: {
-//                     select: {
-//                         id: true,
-//                         nome: true,
-//                     },
-//                 },
-
-//                 categoria: {
-//                     select: {
-//                         id: true,
-//                         nome: true,
-//                     },
-//                 },
-//             },
-//             orderBy: [
-//                 { dataLancamento: "desc" },
-//                 { id: "desc" },
-//             ],
-//         });
-
-//         const totalEntradas = await prisma.lancamento.aggregate({
-//             where: {
-//                 fornecedorClienteId: Number(id),
-//                 tipo: "ENTRADA",
-//             },
-//             _sum: {
-//                 valor: true,
-//             },
-//         });
-
-//         const totalSaidas = await prisma.lancamento.aggregate({
-//             where: {
-//                 fornecedorClienteId: Number(id),
-//                 tipo: "SAIDA",
-//             },
-//             _sum: {
-//                 valor: true,
-//             },
-//         });
-
-//         return res.status(200).json({
-//             fornecedorCliente,
-//             filtro: tipoFiltro,
-//             resumo: {
-//                 totalRegistros: lancamentos.length,
-//                 totalEntradas: Number(totalEntradas._sum.valor || 0),
-//                 totalSaidas: Number(totalSaidas._sum.valor || 0),
-//                 saldoCalculado:
-//                     Number(totalEntradas._sum.valor || 0) -
-//                     Number(totalSaidas._sum.valor || 0),
-//             },
-//             lancamentos,
-//         });
-//     } catch (error) {
-//         return res.status(500).json({
-//             message: "Erro ao buscar lançamentos do cliente",
-//             error: error instanceof Error ? error.message : error,
-//         });
-//     }
-// });
 export default router;

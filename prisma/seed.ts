@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma.js";
+import { hashSenha } from "../src/auth/senha.js";
 
 // ---------- utilitários de aleatoriedade ----------
 function randomInt(min: number, max: number): number {
@@ -9,12 +10,10 @@ function randomItem<T>(arr: T[]): T {
   return arr[randomInt(0, arr.length - 1)]!;
 }
 
-// valor monetário aleatório com 2 casas decimais
 function randomValor(min: number, max: number): number {
   return Math.round((Math.random() * (max - min) + min) * 100) / 100;
 }
 
-// data aleatória nos últimos `dias` dias a partir de hoje
 function randomData(dias: number): Date {
   const agora = Date.now();
   const offset = randomInt(0, dias) * 24 * 60 * 60 * 1000;
@@ -24,115 +23,82 @@ function randomData(dias: number): Date {
 
 // ---------- dados de referência ----------
 const CATEGORIAS = [
-  "Vendas",
-  "Compras",
-  "Salários",
-  "Aluguel",
-  "Marketing",
-  "Impostos",
-  "Manutenção",
-  "Serviços",
-  "Transporte",
-  "Outros",
+  "Vendas", "Compras", "Salários", "Aluguel", "Marketing",
+  "Impostos", "Manutenção", "Serviços", "Transporte", "Outros",
 ];
 
 const CONTAS = [
-  "Conta Corrente",
-  "Conta Poupança",
-  "Caixa",
-  "Cartão de Crédito",
-  "Investimentos",
-  "Conta Digital",
+  "Conta Corrente", "Conta Poupança", "Caixa",
+  "Cartão de Crédito", "Investimentos", "Conta Digital",
 ];
 
 const FORNECEDORES_CLIENTES = [
-  "Mercado Central LTDA",
-  "Distribuidora São Jorge",
-  "Tech Solutions ME",
-  "Padaria Pão Quente",
-  "Auto Peças Veloz",
-  "Construtora Horizonte",
-  "Maria Aparecida Souza",
-  "João Pedro Almeida",
-  "Comércio de Tecidos Aurora",
-  "Farmácia Vida Plena",
-  "Transportadora Rota Sul",
-  "Café Aroma Especial",
-  "Eletro Center Eireli",
-  "Papelaria do Saber",
-  "Ana Carolina Ferreira",
-  "Carlos Eduardo Lima",
-  "Restaurante Sabor Caseiro",
-  "Oficina Mecânica do Zé",
-  "Agropecuária Boa Terra",
-  "Studio Beleza & Estética",
-  "Livraria Letra Viva",
-  "Hortifruti Natural",
-  "Marcenaria Madeira Nobre",
-  "Clínica Bem Estar",
-  "Fernanda Ribeiro Costa",
-  "Roberto Carlos Mendes",
-  "Imobiliária Lar Feliz",
-  "Gráfica Impacto Visual",
-  "Pet Shop Amigo Fiel",
-  "Academia Corpo em Forma",
+  "Mercado Central LTDA", "Distribuidora São Jorge", "Tech Solutions ME",
+  "Padaria Pão Quente", "Auto Peças Veloz", "Construtora Horizonte",
+  "Maria Aparecida Souza", "João Pedro Almeida", "Comércio de Tecidos Aurora",
+  "Farmácia Vida Plena", "Transportadora Rota Sul", "Café Aroma Especial",
+  "Eletro Center Eireli", "Papelaria do Saber", "Ana Carolina Ferreira",
+  "Carlos Eduardo Lima", "Restaurante Sabor Caseiro", "Oficina Mecânica do Zé",
+  "Agropecuária Boa Terra", "Studio Beleza & Estética",
 ];
 
-const CLASSIFICACOES = [
-  "Fixo",
-  "Variável",
-  "Recorrente",
-  "Avulso",
-  "Investimento",
-  null,
-];
+const CLASSIFICACOES = ["Fixo", "Variável", "Recorrente", "Avulso", "Investimento", null];
 
 const OBSERVACOES = [
-  "Pagamento referente ao mês corrente",
-  "Lançamento gerado automaticamente",
-  "Parcela única",
-  "Aguardando confirmação bancária",
-  "Conferido com nota fiscal",
-  "Renegociado com o cliente",
-  null,
-  null,
+  "Pagamento referente ao mês corrente", "Lançamento gerado automaticamente",
+  "Parcela única", "Aguardando confirmação bancária",
+  "Conferido com nota fiscal", "Renegociado com o cliente", null, null,
 ];
 
-const TOTAL_LANCAMENTOS = 500;
+// admin global do sistema
+const ADMIN = { email: "admin@sistema.com", senha: "admin123" };
 
-async function main() {
-  console.log("🧹 Limpando dados existentes...");
-  // ordem importa por causa das foreign keys
-  await prisma.lancamento.deleteMany();
-  await prisma.fornecedorCliente.deleteMany();
-  await prisma.conta.deleteMany();
-  await prisma.categoria.deleteMany();
+// empresas (tenants) de exemplo
+const EMPRESAS = [
+  {
+    cnpj: "11222333000181",
+    razaoSocial: "Comércio Alfa LTDA",
+    nomeFantasia: "Alfa Comércio",
+    inscricaoEstadual: "111222333",
+    inscricaoMunicipal: "9988776",
+    endereco: "Rua das Flores, 100 - Centro",
+    email: "alfa@empresa.com",
+    senha: "empresa123",
+  },
+  {
+    cnpj: "99888777000166",
+    razaoSocial: "Serviços Beta ME",
+    nomeFantasia: "Beta Serviços",
+    inscricaoEstadual: "444555666",
+    inscricaoMunicipal: "1122334",
+    endereco: "Av. Brasil, 2000 - Jardim América",
+    email: "beta@empresa.com",
+    senha: "empresa123",
+  },
+];
 
-  console.log("📂 Criando categorias...");
+const LANCAMENTOS_POR_EMPRESA = 200;
+
+async function semearDadosDaEmpresa(empresaId: number) {
   await prisma.categoria.createMany({
-    data: CATEGORIAS.map((nome) => ({ nome })),
+    data: CATEGORIAS.map((nome) => ({ nome, empresaId })),
   });
-
-  console.log("🏦 Criando contas (tipos de conta)...");
   await prisma.conta.createMany({
-    data: CONTAS.map((nome) => ({ nome })),
+    data: CONTAS.map((nome) => ({ nome, empresaId })),
   });
-
-  console.log("👥 Criando fornecedores/clientes...");
   await prisma.fornecedorCliente.createMany({
-    data: FORNECEDORES_CLIENTES.map((nome) => ({ nome })),
+    data: FORNECEDORES_CLIENTES.map((nome) => ({ nome, empresaId })),
   });
 
-  // busca os IDs reais (autoincrement não reinicia após delete)
   const [categorias, contas, fornecedores] = await Promise.all([
-    prisma.categoria.findMany({ select: { id: true } }),
-    prisma.conta.findMany({ select: { id: true } }),
-    prisma.fornecedorCliente.findMany({ select: { id: true } }),
+    prisma.categoria.findMany({ where: { empresaId }, select: { id: true } }),
+    prisma.conta.findMany({ where: { empresaId }, select: { id: true } }),
+    prisma.fornecedorCliente.findMany({
+      where: { empresaId },
+      select: { id: true },
+    }),
   ]);
 
-  console.log(`💸 Gerando ${TOTAL_LANCAMENTOS} lançamentos aleatórios...`);
-
-  // saldo acumulado por fornecedor (mantém consistência com a regra do POST /lancamentos)
   const saldoPorFornecedor = new Map<number, number>();
   for (const f of fornecedores) saldoPorFornecedor.set(f.id, 0);
 
@@ -142,14 +108,14 @@ async function main() {
     valor: number;
     classificacao: string | null;
     observacao: string | null;
+    empresaId: number;
     fornecedorClienteId: number;
     contaId: number;
     categoriaId: number;
   }[];
 
-  for (let i = 0; i < TOTAL_LANCAMENTOS; i++) {
+  for (let i = 0; i < LANCAMENTOS_POR_EMPRESA; i++) {
     const fornecedor = randomItem(fornecedores);
-    // ~55% entradas, 45% saídas
     const tipo: "ENTRADA" | "SAIDA" = Math.random() < 0.55 ? "ENTRADA" : "SAIDA";
     const valor = randomValor(50, 9000);
 
@@ -159,6 +125,7 @@ async function main() {
       valor,
       classificacao: randomItem(CLASSIFICACOES),
       observacao: randomItem(OBSERVACOES),
+      empresaId,
       fornecedorClienteId: fornecedor.id,
       contaId: randomItem(contas).id,
       categoriaId: randomItem(categorias).id,
@@ -173,31 +140,56 @@ async function main() {
 
   await prisma.lancamento.createMany({ data: lancamentos });
 
-  console.log("⚖️  Atualizando saldos dos fornecedores/clientes...");
-  // updates em paralelo (limitados pelo connectionLimit do pool) — não precisam
-  // ser atômicos num seed e evitam o timeout de transação interativa
   await Promise.all(
     fornecedores.map((f) =>
       prisma.fornecedorCliente.update({
         where: { id: f.id },
-        data: { saldo: Math.round((saldoPorFornecedor.get(f.id) ?? 0) * 100) / 100 },
+        data: {
+          saldo: Math.round((saldoPorFornecedor.get(f.id) ?? 0) * 100) / 100,
+        },
       }),
     ),
   );
+}
 
-  // resumo final
-  const [c, ct, fc, l] = await Promise.all([
-    prisma.categoria.count(),
-    prisma.conta.count(),
-    prisma.fornecedorCliente.count(),
+async function main() {
+  console.log("🧹 Limpando dados existentes...");
+  await prisma.lancamento.deleteMany();
+  await prisma.fornecedorCliente.deleteMany();
+  await prisma.conta.deleteMany();
+  await prisma.categoria.deleteMany();
+  await prisma.empresa.deleteMany();
+  await prisma.admin.deleteMany();
+
+  console.log("👤 Criando administrador...");
+  await prisma.admin.create({
+    data: { email: ADMIN.email, senha: await hashSenha(ADMIN.senha) },
+  });
+
+  console.log("🏢 Criando empresas e seus dados...");
+  for (const e of EMPRESAS) {
+    const empresa = await prisma.empresa.create({
+      data: { ...e, senha: await hashSenha(e.senha) },
+    });
+    console.log(`   → ${empresa.razaoSocial} (id ${empresa.id})`);
+    await semearDadosDaEmpresa(empresa.id);
+  }
+
+  const [admins, empresas, l] = await Promise.all([
+    prisma.admin.count(),
+    prisma.empresa.count(),
     prisma.lancamento.count(),
   ]);
 
   console.log("\n✅ Seed concluído!");
-  console.log(`   Categorias:            ${c}`);
-  console.log(`   Contas:                ${ct}`);
-  console.log(`   Fornecedores/Clientes: ${fc}`);
-  console.log(`   Lançamentos:           ${l}`);
+  console.log(`   Admins:      ${admins}`);
+  console.log(`   Empresas:    ${empresas}`);
+  console.log(`   Lançamentos: ${l}`);
+  console.log("\nCredenciais de exemplo:");
+  console.log(`   ADMIN   → ${ADMIN.email} / ${ADMIN.senha}`);
+  for (const e of EMPRESAS) {
+    console.log(`   EMPRESA → ${e.email} (ou CNPJ ${e.cnpj}) / ${e.senha}`);
+  }
 }
 
 main()

@@ -29,6 +29,15 @@ const adapter = new PrismaMariaDb({
   connectionLimit: 5,
 });
 
-const prisma = new PrismaClient({ adapter });
+// `omit` global: a senha (hash) nunca é selecionada por padrão, evitando
+// vazamento acidental em respostas. As rotas de login sobrescrevem com
+// `omit: { senha: false }` apenas para validar a credencial.
+const prisma = new PrismaClient({
+  adapter,
+  omit: {
+    empresa: { senha: true },
+    admin: { senha: true },
+  },
+});
 
 export { prisma };

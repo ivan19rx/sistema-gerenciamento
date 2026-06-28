@@ -7,7 +7,9 @@ const swaggerSpec = {
         title: "Finanças API",
         version: "1.0.0",
         description:
-            "API de gerenciamento financeiro: contas, categorias, fornecedores/clientes e lançamentos (entradas e saídas).",
+            "API de gerenciamento financeiro multiempresa. Autentique em /auth/login (empresa, por CNPJ ou e-mail) ou /auth/admin/login (admin) e envie o token no header Authorization: Bearer. " +
+            "A empresa opera sempre sobre os próprios dados (o tenant vem do token). " +
+            "O admin lê e escreve os dados de qualquer empresa: liste-as em GET /empresas e, ao acessar uma, envie o ID dela no header X-Empresa-Id em todas as chamadas de dados (contas, categorias, fornecedores/clientes e lançamentos).",
     },
     servers: [
         {
@@ -16,6 +18,8 @@ const swaggerSpec = {
         },
     ],
     tags: [
+        { name: "Autenticação", description: "Login de empresa e administrador" },
+        { name: "Empresas", description: "Cadastro de empresas (somente admin)" },
         { name: "Contas", description: "Tipos de conta" },
         { name: "Categorias", description: "Categorias de lançamentos" },
         {
@@ -117,6 +121,22 @@ const swaggerSpec = {
                     },
                 ],
             },
+            Empresa: {
+                type: "object",
+                properties: {
+                    id: { type: "integer", example: 1 },
+                    cnpj: { type: "string", example: "11222333000181" },
+                    razaoSocial: { type: "string", example: "Comércio Alfa LTDA" },
+                    nomeFantasia: { type: "string", nullable: true },
+                    inscricaoEstadual: { type: "string", nullable: true },
+                    inscricaoMunicipal: { type: "string", nullable: true },
+                    endereco: { type: "string", nullable: true },
+                    email: { type: "string", example: "alfa@empresa.com" },
+                    ativo: { type: "boolean", example: true },
+                    criadoEm: { type: "string", format: "date-time" },
+                    atualizadoEm: { type: "string", format: "date-time" },
+                },
+            },
             Mensagem: {
                 type: "object",
                 properties: {
@@ -133,7 +153,190 @@ const swaggerSpec = {
         },
     },
     paths: {
+        "/auth/login": {
+            post: {
+                tags: ["Autenticação"],
+                summary: "Login da empresa (CNPJ ou e-mail)",
+                security: [],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["identificador", "senha"],
+                                properties: {
+                                    identificador: {
+                                        type: "string",
+                                        example: "11222333000181",
+                                        description: "CNPJ ou e-mail da empresa",
+                                    },
+                                    senha: { type: "string", example: "empresa123" },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: {
+                        description: "Autenticado (retorna token e dados da empresa)",
+                    },
+                    400: { $ref: "#/components/responses/Validacao" },
+                    401: { description: "Credenciais inválidas" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+        },
+        "/auth/admin/login": {
+            post: {
+                tags: ["Autenticação"],
+                summary: "Login do administrador global",
+                security: [],
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["email", "senha"],
+                                properties: {
+                                    email: { type: "string", example: "admin@sistema.com" },
+                                    senha: { type: "string", example: "admin123" },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: { description: "Autenticado (retorna token)" },
+                    400: { $ref: "#/components/responses/Validacao" },
+                    401: { description: "Credenciais inválidas" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+        },
+        "/empresas": {
+            get: {
+                tags: ["Empresas"],
+                summary: "Lista empresas (somente admin)",
+                responses: {
+                    200: {
+                        description: "Lista de empresas",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "array",
+                                    items: { $ref: "#/components/schemas/Empresa" },
+                                },
+                            },
+                        },
+                    },
+                    403: { description: "Acesso restrito ao administrador" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+            post: {
+                tags: ["Empresas"],
+                summary: "Cadastra uma empresa (somente admin)",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                required: ["cnpj", "razaoSocial", "email", "senha"],
+                                properties: {
+                                    cnpj: { type: "string", example: "11222333000181" },
+                                    razaoSocial: { type: "string", example: "Comércio Alfa LTDA" },
+                                    nomeFantasia: { type: "string", example: "Alfa Comércio" },
+                                    inscricaoEstadual: { type: "string" },
+                                    inscricaoMunicipal: { type: "string" },
+                                    endereco: { type: "string" },
+                                    email: { type: "string", example: "alfa@empresa.com" },
+                                    senha: { type: "string", example: "empresa123" },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    201: { description: "Empresa criada com sucesso" },
+                    400: { $ref: "#/components/responses/Validacao" },
+                    403: { description: "Acesso restrito ao administrador" },
+                    409: { $ref: "#/components/responses/Conflito" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+        },
+        "/empresas/{id}": {
+            parameters: [
+                { name: "id", in: "path", required: true, schema: { type: "integer" } },
+            ],
+            get: {
+                tags: ["Empresas"],
+                summary: "Detalha uma empresa (somente admin)",
+                responses: {
+                    200: {
+                        description: "Empresa",
+                        content: {
+                            "application/json": {
+                                schema: { $ref: "#/components/schemas/Empresa" },
+                            },
+                        },
+                    },
+                    404: { $ref: "#/components/responses/NaoEncontrado" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+            put: {
+                tags: ["Empresas"],
+                summary: "Atualiza uma empresa (somente admin)",
+                description:
+                    "Envie apenas os campos a alterar. 'ativo: false' desliga a empresa.",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                properties: {
+                                    cnpj: { type: "string" },
+                                    razaoSocial: { type: "string" },
+                                    nomeFantasia: { type: "string" },
+                                    inscricaoEstadual: { type: "string" },
+                                    inscricaoMunicipal: { type: "string" },
+                                    endereco: { type: "string" },
+                                    email: { type: "string" },
+                                    senha: { type: "string" },
+                                    ativo: { type: "boolean" },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: { description: "Empresa atualizada com sucesso" },
+                    400: { $ref: "#/components/responses/Validacao" },
+                    404: { $ref: "#/components/responses/NaoEncontrado" },
+                    409: { $ref: "#/components/responses/Conflito" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+            delete: {
+                tags: ["Empresas"],
+                summary: "Remove uma empresa (somente admin)",
+                description:
+                    "Bloqueado se houver lançamentos vinculados; nesse caso, desative com ativo=false.",
+                responses: {
+                    200: { $ref: "#/components/responses/Sucesso" },
+                    404: { $ref: "#/components/responses/NaoEncontrado" },
+                    409: { $ref: "#/components/responses/Conflito" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+        },
         "/contas": {
+            parameters: [{ $ref: "#/components/parameters/EmpresaIdHeader" }],
             get: {
                 tags: ["Contas"],
                 summary: "Lista todas as contas",
@@ -192,6 +395,7 @@ const swaggerSpec = {
         },
         "/contas/{id}": {
             parameters: [
+                { $ref: "#/components/parameters/EmpresaIdHeader" },
                 {
                     name: "id",
                     in: "path",
@@ -252,6 +456,7 @@ const swaggerSpec = {
             },
         },
         "/categorias": {
+            parameters: [{ $ref: "#/components/parameters/EmpresaIdHeader" }],
             get: {
                 tags: ["Categorias"],
                 summary: "Lista todas as categorias",
@@ -310,6 +515,7 @@ const swaggerSpec = {
         },
         "/categorias/{id}": {
             parameters: [
+                { $ref: "#/components/parameters/EmpresaIdHeader" },
                 {
                     name: "id",
                     in: "path",
@@ -370,6 +576,7 @@ const swaggerSpec = {
             },
         },
         "/fornecedores-clientes": {
+            parameters: [{ $ref: "#/components/parameters/EmpresaIdHeader" }],
             get: {
                 tags: ["Fornecedores/Clientes"],
                 summary: "Lista todos os fornecedores/clientes",
@@ -435,6 +642,7 @@ const swaggerSpec = {
         },
         "/fornecedores-clientes/{id}": {
             parameters: [
+                { $ref: "#/components/parameters/EmpresaIdHeader" },
                 {
                     name: "id",
                     in: "path",
@@ -499,6 +707,7 @@ const swaggerSpec = {
             },
         },
         "/lancamentos": {
+            parameters: [{ $ref: "#/components/parameters/EmpresaIdHeader" }],
             get: {
                 tags: ["Lançamentos"],
                 summary: "Lista todos os lançamentos",
@@ -594,6 +803,7 @@ const swaggerSpec = {
         },
         "/lancamentos/{id}": {
             parameters: [
+                { $ref: "#/components/parameters/EmpresaIdHeader" },
                 {
                     name: "id",
                     in: "path",
@@ -676,6 +886,7 @@ const swaggerSpec = {
             },
         },
         "/lancamentos/filtros": {
+            parameters: [{ $ref: "#/components/parameters/EmpresaIdHeader" }],
             get: {
                 tags: ["Lançamentos"],
                 summary: "Filtra lançamentos e retorna um resumo",
@@ -753,6 +964,7 @@ const swaggerSpec = {
             },
         },
         "/lancamentos/resumo": {
+            parameters: [{ $ref: "#/components/parameters/EmpresaIdHeader" }],
             get: {
                 tags: ["Lançamentos"],
                 summary: "Resumo geral dos lançamentos",
@@ -784,6 +996,20 @@ const swaggerSpec = {
                 },
             },
         },
+    },
+};
+
+// Parâmetros reutilizáveis.
+(swaggerSpec.components as Record<string, unknown>).parameters = {
+    EmpresaIdHeader: {
+        name: "X-Empresa-Id",
+        in: "header",
+        required: false,
+        schema: { type: "integer", example: 2 },
+        description:
+            "Empresa-alvo da requisição. Obrigatório para o ADMIN (define qual empresa ele está acessando para ler/escrever). " +
+            "Ignorado para EMPRESA, que sempre opera sobre a própria empresa do token. " +
+            "Alternativamente pode ser enviado como query string ?empresaId=.",
     },
 };
 
@@ -831,5 +1057,13 @@ const swaggerSpec = {
         },
     },
 };
+
+// Esquema de segurança Bearer (JWT) e exigência global de autenticação.
+// As rotas públicas de /auth sobrescrevem com `security: []`.
+(swaggerSpec.components as Record<string, unknown>).securitySchemes = {
+    bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+};
+
+(swaggerSpec as Record<string, unknown>).security = [{ bearerAuth: [] }];
 
 export { swaggerSpec };
