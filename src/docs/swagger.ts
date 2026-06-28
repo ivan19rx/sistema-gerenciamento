@@ -77,8 +77,8 @@ const swaggerSpec = {
                         example: "Pagamento mensal",
                     },
                     fornecedorClienteId: { type: "integer", example: 1 },
-                    contaId: { type: "integer", nullable: true, example: 2 },
-                    categoriaId: { type: "integer", nullable: true, example: 3 },
+                    contaId: { type: "integer", example: 2 },
+                    categoriaId: { type: "integer", example: 3 },
                     criadoEm: { type: "string", format: "date-time" },
                     atualizadoEm: { type: "string", format: "date-time" },
                 },
@@ -531,7 +531,14 @@ const swaggerSpec = {
                         "application/json": {
                             schema: {
                                 type: "object",
-                                required: ["dataLancamento", "fornecedorClienteId", "tipo", "valor"],
+                                required: [
+                                    "dataLancamento",
+                                    "fornecedorClienteId",
+                                    "tipo",
+                                    "valor",
+                                    "contaId",
+                                    "categoriaId",
+                                ],
                                 properties: {
                                     dataLancamento: {
                                         type: "string",
@@ -545,13 +552,13 @@ const swaggerSpec = {
                                         example: "ENTRADA",
                                     },
                                     valor: { type: "number", example: 100.0 },
-                                    contaId: { type: "integer", nullable: true, example: 2 },
+                                    contaId: { type: "integer", example: 2 },
                                     classificacao: {
                                         type: "string",
                                         nullable: true,
                                         example: "Fixo",
                                     },
-                                    categoriaId: { type: "integer", nullable: true, example: 3 },
+                                    categoriaId: { type: "integer", example: 3 },
                                     observacao: {
                                         type: "string",
                                         nullable: true,
@@ -610,9 +617,9 @@ const swaggerSpec = {
                                     fornecedorClienteId: { type: "integer" },
                                     tipo: { type: "string", enum: ["ENTRADA", "SAIDA"] },
                                     valor: { type: "number" },
-                                    contaId: { type: "integer", nullable: true },
+                                    contaId: { type: "integer" },
                                     classificacao: { type: "string", nullable: true },
-                                    categoriaId: { type: "integer", nullable: true },
+                                    categoriaId: { type: "integer" },
                                     observacao: { type: "string", nullable: true },
                                 },
                             },

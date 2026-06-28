@@ -244,9 +244,17 @@ router.post("/", async (req, res) => {
             observacao,
         } = req.body;
 
-        if (!dataLancamento || !fornecedorClienteId || !tipo || !valor) {
+        if (
+            !dataLancamento ||
+            !fornecedorClienteId ||
+            !tipo ||
+            !valor ||
+            !contaId ||
+            !categoriaId
+        ) {
             return res.status(400).json({
-                message: "Data, fornecedor/cliente, tipo e valor são obrigatórios",
+                message:
+                    "Data, fornecedor/cliente, tipo, valor, conta e categoria são obrigatórios",
             });
         }
 
@@ -283,9 +291,9 @@ router.post("/", async (req, res) => {
                     fornecedorClienteId: Number(fornecedorClienteId),
                     tipo,
                     valor,
-                    contaId: contaId ? Number(contaId) : null,
+                    contaId: Number(contaId),
                     classificacao: classificacao ? classificacao.trim() : null,
-                    categoriaId: categoriaId ? Number(categoriaId) : null,
+                    categoriaId: Number(categoriaId),
                     observacao,
                 },
             });
@@ -401,6 +409,24 @@ router.patch("/:id", async (req, res) => {
             });
         }
 
+        if (
+            contaId !== undefined &&
+            (contaId === null || contaId === "" || isNaN(Number(contaId)))
+        ) {
+            return res.status(400).json({
+                message: "Conta inválida. A conta é obrigatória",
+            });
+        }
+
+        if (
+            categoriaId !== undefined &&
+            (categoriaId === null || categoriaId === "" || isNaN(Number(categoriaId)))
+        ) {
+            return res.status(400).json({
+                message: "Categoria inválida. A categoria é obrigatória",
+            });
+        }
+
         const resultado = await prisma.$transaction(async (tx) => {
             const lancamentoAtual = await tx.lancamento.findUnique({
                 where: { id: Number(id) },
@@ -476,7 +502,7 @@ router.patch("/:id", async (req, res) => {
             }
 
             if (contaId !== undefined) {
-                dadosAtualizacao.contaId = contaId === null ? null : Number(contaId);
+                dadosAtualizacao.contaId = Number(contaId);
             }
 
             if (classificacao !== undefined) {
@@ -485,8 +511,7 @@ router.patch("/:id", async (req, res) => {
             }
 
             if (categoriaId !== undefined) {
-                dadosAtualizacao.categoriaId =
-                    categoriaId === null ? null : Number(categoriaId);
+                dadosAtualizacao.categoriaId = Number(categoriaId);
             }
 
             if (observacao !== undefined) {
