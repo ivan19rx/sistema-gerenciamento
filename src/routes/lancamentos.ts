@@ -8,7 +8,8 @@ const router = Router();
 router.get("/filtros", async (req, res) => {
     try {
         const empresaId = getEmpresaId(req);
-        const { clienteId, contaId, categoriaId, tipo } = req.query;
+        const { clienteId, contaId, categoriaId, tipo, dataInicio, dataFim } =
+            req.query;
 
         // sempre escopado à empresa resolvida
         const where: any = { empresaId };
@@ -54,6 +55,42 @@ router.get("/filtros", async (req, res) => {
             }
         }
 
+        // Filtro de período por data do lançamento. Aceita "YYYY-MM-DD" e trata
+        // o intervalo como inclusivo em ambas as pontas (o dia final inteiro).
+        const periodo: { gte?: Date; lte?: Date } = {};
+
+        if (dataInicio !== undefined && dataInicio !== "") {
+            const inicio = new Date(`${String(dataInicio)}T00:00:00.000Z`);
+            if (isNaN(inicio.getTime())) {
+                return res
+                    .status(400)
+                    .json({ message: "Data inicial inválida" });
+            }
+            periodo.gte = inicio;
+        }
+
+        if (dataFim !== undefined && dataFim !== "") {
+            const fim = new Date(`${String(dataFim)}T23:59:59.999Z`);
+            if (isNaN(fim.getTime())) {
+                return res.status(400).json({ message: "Data final inválida" });
+            }
+            periodo.lte = fim;
+        }
+
+        if (
+            periodo.gte !== undefined &&
+            periodo.lte !== undefined &&
+            periodo.gte > periodo.lte
+        ) {
+            return res.status(400).json({
+                message: "A data inicial não pode ser maior que a data final",
+            });
+        }
+
+        if (periodo.gte !== undefined || periodo.lte !== undefined) {
+            where.dataLancamento = periodo;
+        }
+
         const [lancamentos, totalEntradas, totalSaidas] = await Promise.all([
             prisma.lancamento.findMany({
                 where,
@@ -88,6 +125,8 @@ router.get("/filtros", async (req, res) => {
                 contaId: contaId ? Number(contaId) : null,
                 categoriaId: categoriaId ? Number(categoriaId) : null,
                 tipo: tipo ? String(tipo).toUpperCase() : "TODOS",
+                dataInicio: dataInicio ? String(dataInicio) : null,
+                dataFim: dataFim ? String(dataFim) : null,
             },
             resumo: {
                 totalRegistros: lancamentos.length,

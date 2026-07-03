@@ -22,6 +22,42 @@ router.get("/", async (req, res) => {
     }
 });
 
+// GET /fornecedores-clientes/resumo
+// Soma exata (Decimal) dos saldos da empresa: positivos = a receber,
+// negativos = a pagar. Independente de paginação/filtros da listagem.
+router.get("/resumo", async (req, res) => {
+    try {
+        const empresaId = getEmpresaId(req);
+
+        const [receber, pagar] = await Promise.all([
+            prisma.fornecedorCliente.aggregate({
+                where: { empresaId, saldo: { gt: 0 } },
+                _sum: { saldo: true },
+            }),
+            prisma.fornecedorCliente.aggregate({
+                where: { empresaId, saldo: { lt: 0 } },
+                _sum: { saldo: true },
+            }),
+        ]);
+
+        const totalReceber = Number(receber._sum.saldo || 0);
+        // A soma dos saldos negativos é negativa; "a pagar" é o valor absoluto.
+        const totalPagar = Math.abs(Number(pagar._sum.saldo || 0));
+
+        return res.status(200).json({
+            resumo: {
+                totalReceber,
+                totalPagar,
+                saldo: totalReceber - totalPagar,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({
+            message: "Erro ao calcular resumo de fornecedores/clientes",
+        });
+    }
+});
+
 // POST /fornecedores-clientes
 router.post("/", async (req, res) => {
     try {
