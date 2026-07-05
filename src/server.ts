@@ -8,6 +8,8 @@ import contasRouter from "./routes/contas.js";
 import categoriasRouter from "./routes/categorias.js";
 import fornecedoresClientesRouter from "./routes/fornecedoresClientes.js";
 import lancamentosRouter from "./routes/lancamentos.js";
+import movimentacoesRouter from "./routes/movimentacoes.js";
+import produtosRouter from "./routes/produtos.js";
 import { swaggerSpec } from "./docs/swagger.js";
 import { autenticar, apenasAdmin, resolverEmpresa } from "./auth/middleware.js";
 
@@ -39,6 +41,8 @@ app.use(
     fornecedoresClientesRouter,
 );
 app.use("/lancamentos", autenticar, resolverEmpresa, lancamentosRouter);
+app.use("/movimentacoes", autenticar, resolverEmpresa, movimentacoesRouter);
+app.use("/produtos", autenticar, resolverEmpresa, produtosRouter);
 
 app.listen(port, () => {
     console.log("Servidor rodando na porta: " + port);

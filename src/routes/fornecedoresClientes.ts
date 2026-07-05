@@ -23,13 +23,13 @@ router.get("/", async (req, res) => {
 });
 
 // GET /fornecedores-clientes/resumo
-// Soma exata (Decimal) dos saldos da empresa: positivos = a receber,
-// negativos = a pagar. Independente de paginação/filtros da listagem.
+// Soma exata (Decimal) dos saldos da empresa: saldos negativos = a receber,
+// positivos = a pagar. Independente de paginação/filtros da listagem.
 router.get("/resumo", async (req, res) => {
     try {
         const empresaId = getEmpresaId(req);
 
-        const [receber, pagar] = await Promise.all([
+        const [positivos, negativos] = await Promise.all([
             prisma.fornecedorCliente.aggregate({
                 where: { empresaId, saldo: { gt: 0 } },
                 _sum: { saldo: true },
@@ -40,9 +40,10 @@ router.get("/resumo", async (req, res) => {
             }),
         ]);
 
-        const totalReceber = Number(receber._sum.saldo || 0);
-        // A soma dos saldos negativos é negativa; "a pagar" é o valor absoluto.
-        const totalPagar = Math.abs(Number(pagar._sum.saldo || 0));
+        // A receber = soma dos saldos negativos (em módulo); a pagar = soma dos
+        // saldos positivos. Saldo = a receber − a pagar.
+        const totalReceber = Math.abs(Number(negativos._sum.saldo || 0));
+        const totalPagar = Number(positivos._sum.saldo || 0);
 
         return res.status(200).json({
             resumo: {
