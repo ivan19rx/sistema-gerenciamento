@@ -69,6 +69,31 @@ router.get("/", async (req, res) => {
     }
 });
 
+// GET /movimentacoes/transportadoras  — nomes distintos de transportadoras já
+// usadas pela empresa (para autocomplete no cadastro de saídas).
+router.get("/transportadoras", async (req, res) => {
+    try {
+        const empresaId = getEmpresaId(req);
+
+        const rows = await prisma.movimentacao.findMany({
+            where: { empresaId, transportadora: { not: null } },
+            select: { transportadora: true },
+            distinct: ["transportadora"],
+            orderBy: { transportadora: "asc" },
+        });
+
+        const transportadoras = rows
+            .map((r) => r.transportadora)
+            .filter((t): t is string => !!t);
+
+        return res.status(200).json(transportadoras);
+    } catch (error) {
+        return res
+            .status(500)
+            .json({ message: "Erro ao buscar transportadoras" });
+    }
+});
+
 // POST /movimentacoes  — cria a movimentação e ajusta o saldo do fornecedor/cliente.
 router.post("/", async (req, res) => {
     try {
