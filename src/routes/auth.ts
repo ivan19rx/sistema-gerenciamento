@@ -64,18 +64,31 @@ router.post("/login", async (req, res) => {
 });
 
 // POST /auth/admin/login
+// O "identificador" pode ser o CNPJ ou o e-mail do admin.
+// Aceita também o campo legado `email` para compatibilidade.
 router.post("/admin/login", async (req, res) => {
     try {
-        const { email, senha } = req.body;
+        const { identificador, email, senha } = req.body;
+        const entrada = identificador ?? email;
 
-        if (!email || !senha) {
-            return res
-                .status(400)
-                .json({ message: "Informe e-mail e senha" });
+        if (!entrada || !senha) {
+            return res.status(400).json({
+                message: "Informe identificador (CNPJ ou e-mail) e senha",
+            });
         }
 
-        const admin = await prisma.admin.findUnique({
-            where: { email: String(email).trim().toLowerCase() },
+        const id = String(entrada).trim();
+        const cnpj = apenasDigitos(id);
+        const pareceCnpj = cnpj.length >= 11;
+
+        const admin = await prisma.admin.findFirst({
+            where: {
+                OR: [
+                    { email: id.toLowerCase() },
+                    ...(pareceCnpj ? [{ cnpj }] : []),
+                ],
+            },
+            // sobrescreve o omit global para poder validar a senha
             omit: { senha: false },
         });
 
@@ -92,7 +105,7 @@ router.post("/admin/login", async (req, res) => {
 
         return res.status(200).json({
             token,
-            admin: { id: admin.id, email: admin.email },
+            admin: { id: admin.id, email: admin.email, cnpj: admin.cnpj },
         });
     } catch (error) {
         return res.status(500).json({ message: "Erro ao efetuar login" });

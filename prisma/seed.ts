@@ -50,8 +50,8 @@ const OBSERVACOES = [
   "Conferido com nota fiscal", "Renegociado com o cliente", null, null,
 ];
 
-// admin global do sistema
-const ADMIN = { email: "admin@sistema.com", senha: "admin123" };
+// admin global do sistema (pode logar por e-mail ou CNPJ)
+const ADMIN = { email: "admin@sistema.com", cnpj: "00000000000191", senha: "admin123" };
 
 // empresas (tenants) de exemplo
 const EMPRESAS = [
@@ -163,7 +163,11 @@ async function main() {
 
   console.log("👤 Criando administrador...");
   await prisma.admin.create({
-    data: { email: ADMIN.email, senha: await hashSenha(ADMIN.senha) },
+    data: {
+      email: ADMIN.email,
+      cnpj: ADMIN.cnpj,
+      senha: await hashSenha(ADMIN.senha),
+    },
   });
 
   console.log("🏢 Criando empresas e seus dados...");
@@ -186,7 +190,7 @@ async function main() {
   console.log(`   Empresas:    ${empresas}`);
   console.log(`   Lançamentos: ${l}`);
   console.log("\nCredenciais de exemplo:");
-  console.log(`   ADMIN   → ${ADMIN.email} / ${ADMIN.senha}`);
+  console.log(`   ADMIN   → ${ADMIN.email} (ou CNPJ ${ADMIN.cnpj}) / ${ADMIN.senha}`);
   for (const e of EMPRESAS) {
     console.log(`   EMPRESA → ${e.email} (ou CNPJ ${e.cnpj}) / ${e.senha}`);
   }

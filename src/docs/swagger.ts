@@ -190,7 +190,7 @@ const swaggerSpec = {
         "/auth/admin/login": {
             post: {
                 tags: ["Autenticação"],
-                summary: "Login do administrador global",
+                summary: "Login do administrador global (CNPJ ou e-mail)",
                 security: [],
                 requestBody: {
                     required: true,
@@ -198,9 +198,13 @@ const swaggerSpec = {
                         "application/json": {
                             schema: {
                                 type: "object",
-                                required: ["email", "senha"],
+                                required: ["identificador", "senha"],
                                 properties: {
-                                    email: { type: "string", example: "admin@sistema.com" },
+                                    identificador: {
+                                        type: "string",
+                                        example: "admin@sistema.com",
+                                        description: "CNPJ ou e-mail do admin",
+                                    },
                                     senha: { type: "string", example: "admin123" },
                                 },
                             },

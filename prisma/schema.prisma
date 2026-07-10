@@ -32,6 +32,7 @@ enum UnidadeMedida {
 model Admin {
   id           Int      @id @default(autoincrement())
   email        String   @unique
+  cnpj         String?  @unique
   senha        String
   ativo        Boolean  @default(true)
   criadoEm     DateTime @default(now()) @map("criado_em")

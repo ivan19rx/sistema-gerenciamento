@@ -5,3 +5,6 @@ node_modules
 dist
 
 /generated/prisma
+
+# Seed de admins com credenciais reais (use seedAdmin.example.ts como modelo)
+prisma/seedAdmin.ts
