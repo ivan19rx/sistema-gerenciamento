@@ -27,6 +27,9 @@ const adapter = new PrismaMariaDb({
   password: DATABASE_PASSWORD,
   database: DATABASE_NAME,
   connectionLimit: 5,
+  // MySQL 8 usa caching_sha2_password; sem TLS, o conector precisa disto
+  // para recuperar a chave pública e concluir o handshake de autenticação.
+  allowPublicKeyRetrieval: true,
 });
 
 // `omit` global: a senha (hash) nunca é selecionada por padrão, evitando
