@@ -242,14 +242,25 @@ router.delete("/:id", async (req, res) => {
             });
         }
 
-        const vinculados = await prisma.lancamento.count({
-            where: { fornecedorClienteId: id, empresaId },
-        });
+        // Lançamentos e movimentações apontam para o cliente (chave estrangeira).
+        // Sem esta checagem das movimentações, o banco recusava a exclusão e a
+        // API devolvia um erro 500 genérico.
+        const [lancamentos, movimentacoes] = await Promise.all([
+            prisma.lancamento.count({ where: { fornecedorClienteId: id, empresaId } }),
+            prisma.movimentacao.count({ where: { fornecedorClienteId: id, empresaId } }),
+        ]);
 
-        if (vinculados > 0) {
+        if (lancamentos > 0 || movimentacoes > 0) {
+            const qtd = (n: number, um: string, varios: string) =>
+                `${n} ${n === 1 ? um : varios}`;
+            const partes = [
+                lancamentos > 0 ? qtd(lancamentos, "lançamento", "lançamentos") : null,
+                movimentacoes > 0
+                    ? qtd(movimentacoes, "movimentação", "movimentações")
+                    : null,
+            ].filter(Boolean);
             return res.status(409).json({
-                message:
-                    "Não é possível excluir fornecedor/cliente com lançamentos vinculados",
+                message: `Não é possível excluir: há ${partes.join(" e ")} deste fornecedor/cliente. Exclua esses registros antes ou inative o cadastro.`,
             });
         }
 
