@@ -657,7 +657,8 @@ const swaggerSpec = {
             put: {
                 tags: ["Fornecedores/Clientes"],
                 summary: "Atualiza um fornecedor/cliente",
-                description: "Todos os campos são opcionais; envie apenas o que deseja alterar.",
+                description:
+                    "Todos os campos são opcionais; envie apenas o que deseja alterar. Para ajustar o saldo manualmente, envie `saldo` (novo valor) e `saldoEsperado` (o saldo que estava sendo exibido): se o saldo mudou nesse meio-tempo, a API responde 409 em vez de sobrescrever. Valores aceitam até 2 casas decimais, com vírgula ou ponto (ex: \"1.234,56\" ou \"1234.56\").",
                 requestBody: {
                     required: true,
                     content: {
@@ -667,7 +668,8 @@ const swaggerSpec = {
                                 properties: {
                                     nome: { type: "string", example: "Mercado Central LTDA" },
                                     ativo: { type: "boolean", example: true },
-                                    saldo: { type: "number", example: 250.5 },
+                                    saldo: { type: "string", example: "250,50" },
+                                    saldoEsperado: { type: "string", example: "150.00" },
                                 },
                             },
                         },

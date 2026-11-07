@@ -1,8 +1,15 @@
 import { Router } from "express";
 import { prisma } from "../../lib/prisma.js";
 import { getEmpresaId } from "../auth/middleware.js";
+import {
+    parseCentavos,
+    centavosParaDecimal,
+    MSG_VALOR_INVALIDO,
+} from "../valores.js";
 
 const router = Router();
+
+const MSG_SALDO_INVALIDO = `Saldo inválido: ${MSG_VALOR_INVALIDO}`;
 
 // GET /fornecedores-clientes
 router.get("/", async (req, res) => {
@@ -69,10 +76,13 @@ router.post("/", async (req, res) => {
             return res.status(400).json({ message: "O nome é obrigatório" });
         }
 
-        if (saldo !== undefined && saldo !== "" && isNaN(parseFloat(saldo))) {
-            return res.status(400).json({
-                message: "O saldo deve ser um número válido",
-            });
+        // saldo inicial (opcional); pode ser negativo (= a receber)
+        const temSaldo = saldo !== undefined && saldo !== null && saldo !== "";
+        const saldoCentavos = temSaldo
+            ? parseCentavos(saldo, { permitirNegativo: true })
+            : null;
+        if (temSaldo && saldoCentavos === null) {
+            return res.status(400).json({ message: MSG_SALDO_INVALIDO });
         }
 
         const nomeFormatado = String(nome).trim();
@@ -91,8 +101,8 @@ router.post("/", async (req, res) => {
             data: {
                 nome: nomeFormatado,
                 empresaId,
-                ...(saldo !== undefined && saldo !== ""
-                    ? { saldo: String(parseFloat(saldo)) }
+                ...(saldoCentavos !== null
+                    ? { saldo: centavosParaDecimal(saldoCentavos) }
                     : {}),
             },
         });
@@ -113,7 +123,7 @@ router.put("/:id", async (req, res) => {
     try {
         const empresaId = getEmpresaId(req);
         const id = Number(req.params.id);
-        const { nome, ativo, saldo } = req.body;
+        const { nome, ativo, saldo, saldoEsperado } = req.body;
 
         if (!id || isNaN(id)) {
             return res.status(400).json({ message: "ID inválido" });
@@ -134,6 +144,27 @@ router.put("/:id", async (req, res) => {
             ativo?: boolean;
             saldo?: string;
         } = {};
+
+        // Ajuste manual de saldo. O saldo também é alterado por lançamentos e
+        // movimentações, então quem edita precisa informar o saldo que estava
+        // vendo (saldoEsperado). Se ele mudou nesse meio-tempo, recusamos em
+        // vez de sobrescrever o valor novo com um antigo.
+        let saldoEsperadoDecimal: string | null = null;
+        if (saldo !== undefined && saldo !== null && saldo !== "") {
+            const novo = parseCentavos(saldo, { permitirNegativo: true });
+            if (novo === null) {
+                return res.status(400).json({ message: MSG_SALDO_INVALIDO });
+            }
+            const esperado = parseCentavos(saldoEsperado, { permitirNegativo: true });
+            if (esperado === null) {
+                return res.status(400).json({
+                    message:
+                        "Para ajustar o saldo, informe também o saldo atual exibido (saldoEsperado)",
+                });
+            }
+            data.saldo = centavosParaDecimal(novo);
+            saldoEsperadoDecimal = centavosParaDecimal(esperado);
+        }
 
         if (nome !== undefined) {
             if (!nome || String(nome).trim() === "") {
@@ -161,20 +192,24 @@ router.put("/:id", async (req, res) => {
             data.ativo = Boolean(ativo);
         }
 
-        if (saldo !== undefined && saldo !== "") {
-            if (isNaN(parseFloat(saldo))) {
-                return res.status(400).json({
-                    message: "O saldo deve ser um número válido",
+        if (saldoEsperadoDecimal !== null) {
+            // UPDATE condicional: só grava se o saldo ainda for o esperado.
+            const { count } = await prisma.fornecedorCliente.updateMany({
+                where: { id, empresaId, saldo: saldoEsperadoDecimal },
+                data,
+            });
+            if (count === 0) {
+                return res.status(409).json({
+                    message:
+                        "O saldo deste cliente/fornecedor mudou desde que o formulário foi aberto (houve um lançamento ou movimentação). Feche, reabra e confira antes de ajustar.",
                 });
             }
-            data.saldo = String(parseFloat(saldo));
+        } else if (Object.keys(data).length > 0) {
+            await prisma.fornecedorCliente.update({ where: { id }, data });
         }
 
         const fornecedorClienteAtualizado =
-            await prisma.fornecedorCliente.update({
-                where: { id },
-                data,
-            });
+            await prisma.fornecedorCliente.findFirst({ where: { id, empresaId } });
 
         return res.status(200).json({
             message: "Fornecedor/cliente atualizado com sucesso",

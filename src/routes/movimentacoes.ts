@@ -1,19 +1,40 @@
 import { Router } from "express";
 import { prisma } from "../../lib/prisma.js";
 import { getEmpresaId } from "../auth/middleware.js";
+import { transacao, travarLinha } from "../transacao.js";
+import {
+    parseCentavos,
+    centavosParaDecimal,
+    decimalParaCentavos,
+    multiplicarCentavos,
+    MAX_CENTAVOS,
+    MSG_VALOR_INVALIDO,
+} from "../valores.js";
 
 const router = Router();
 
-// Efeito de uma movimentação no saldo do fornecedor/cliente:
+// Efeito de uma movimentação no saldo do fornecedor/cliente, em centavos:
 // ENTRADA soma (a pagar), SAIDA subtrai (a receber).
-function efeitoNoSaldo(tipo: "ENTRADA" | "SAIDA", total: number): number {
-    return tipo === "ENTRADA" ? total : -total;
+function efeitoNoSaldo(tipo: "ENTRADA" | "SAIDA", totalCentavos: number): number {
+    return tipo === "ENTRADA" ? totalCentavos : -totalCentavos;
 }
 
-// O total é sempre derivado no servidor: quantidade × preço (2 casas).
-function calcularTotal(quantidade: number, preco: number): number {
-    return Math.round(quantidade * preco * 100) / 100;
+// Ajusta o saldo de forma atômica no banco (UPDATE ... SET saldo = saldo + x),
+// sem "ler, somar em JS e gravar" — evita perder atualizações simultâneas.
+function ajustarSaldo(tx: any, fornecedorClienteId: number, deltaCentavos: number) {
+    return tx.fornecedorCliente.update({
+        where: { id: fornecedorClienteId },
+        data: { saldo: { increment: centavosParaDecimal(deltaCentavos) } },
+    });
 }
+
+// O total é sempre derivado no servidor: quantidade × preço, com os dois já
+// em centavos (exatamente o que fica gravado) e arredondado ao centavo.
+function calcularTotal(qtdCentavos: number, precoCentavos: number): number {
+    return multiplicarCentavos(qtdCentavos, precoCentavos);
+}
+
+const MSG_TOTAL_GRANDE = "O total (quantidade × preço) passa do limite de R$ 99.999.999,99";
 
 const CAMPOS_OPCIONAIS = [
     "valorDetalhado",
@@ -127,20 +148,25 @@ router.post("/", async (req, res) => {
                 .json({ message: "Tipo inválido. Use ENTRADA ou SAIDA" });
         }
 
-        if (isNaN(Number(quantidade)) || Number(quantidade) <= 0) {
+        const qtdCentavos = parseCentavos(quantidade);
+        if (qtdCentavos === null || qtdCentavos <= 0) {
             return res.status(400).json({
-                message: "A quantidade deve ser um número maior que zero",
+                message: `Quantidade inválida: ${MSG_VALOR_INVALIDO}, maior que zero`,
             });
         }
 
-        if (isNaN(Number(preco)) || Number(preco) <= 0) {
+        const precoCentavos = parseCentavos(preco);
+        if (precoCentavos === null || precoCentavos <= 0) {
             return res.status(400).json({
-                message: "O preço deve ser um número maior que zero",
+                message: `Preço inválido: ${MSG_VALOR_INVALIDO}, maior que zero`,
             });
         }
 
         // O total é sempre derivado no servidor: quantidade × preço.
-        const total = calcularTotal(Number(quantidade), Number(preco));
+        const total = calcularTotal(qtdCentavos, precoCentavos);
+        if (total > MAX_CENTAVOS) {
+            return res.status(400).json({ message: MSG_TOTAL_GRANDE });
+        }
 
         const data = new Date(dataMovimento);
         if (isNaN(data.getTime())) {
@@ -152,7 +178,7 @@ router.post("/", async (req, res) => {
             opcionais[campo] = textoOuNull(req.body[campo]);
         }
 
-        const resultado = await prisma.$transaction(async (tx) => {
+        const resultado = await transacao(async (tx) => {
             const fornecedorCliente = await tx.fornecedorCliente.findFirst({
                 where: { id: Number(fornecedorClienteId), empresaId },
             });
@@ -167,8 +193,14 @@ router.post("/", async (req, res) => {
                 throw new Error("Produto não encontrado");
             }
 
-            const novoSaldo =
-                Number(fornecedorCliente.saldo) + efeitoNoSaldo(tipo, total);
+            // Saldo ajustado ANTES de gravar a movimentação: o UPDATE trava a
+            // linha do cliente logo de início e evita deadlock com operações
+            // simultâneas no mesmo cliente.
+            const fornecedorClienteAtualizado = await ajustarSaldo(
+                tx,
+                Number(fornecedorClienteId),
+                efeitoNoSaldo(tipo, total),
+            );
 
             const movimentacao = await tx.movimentacao.create({
                 data: {
@@ -177,18 +209,12 @@ router.post("/", async (req, res) => {
                     fornecedorClienteId: Number(fornecedorClienteId),
                     produtoId: Number(produtoId),
                     tipo,
-                    total,
-                    quantidade: Number(quantidade),
-                    preco: Number(preco),
+                    total: centavosParaDecimal(total),
+                    quantidade: centavosParaDecimal(qtdCentavos),
+                    preco: centavosParaDecimal(precoCentavos),
                     ...opcionais,
                 },
             });
-
-            const fornecedorClienteAtualizado =
-                await tx.fornecedorCliente.update({
-                    where: { id: Number(fornecedorClienteId) },
-                    data: { saldo: novoSaldo },
-                });
 
             return { movimentacao, fornecedorCliente: fornecedorClienteAtualizado };
         });
@@ -231,18 +257,18 @@ router.patch("/:id", async (req, res) => {
                 .json({ message: "Tipo inválido. Use ENTRADA ou SAIDA" });
         }
 
-        if (
-            quantidade !== undefined &&
-            (isNaN(Number(quantidade)) || Number(quantidade) <= 0)
-        ) {
+        const qtdEnviada =
+            quantidade !== undefined ? parseCentavos(quantidade) : undefined;
+        if (qtdEnviada !== undefined && (qtdEnviada === null || qtdEnviada <= 0)) {
             return res.status(400).json({
-                message: "A quantidade deve ser um número maior que zero",
+                message: `Quantidade inválida: ${MSG_VALOR_INVALIDO}, maior que zero`,
             });
         }
 
-        if (preco !== undefined && (isNaN(Number(preco)) || Number(preco) <= 0)) {
+        const precoEnviado = preco !== undefined ? parseCentavos(preco) : undefined;
+        if (precoEnviado !== undefined && (precoEnviado === null || precoEnviado <= 0)) {
             return res.status(400).json({
-                message: "O preço deve ser um número maior que zero",
+                message: `Preço inválido: ${MSG_VALOR_INVALIDO}, maior que zero`,
             });
         }
 
@@ -254,7 +280,8 @@ router.patch("/:id", async (req, res) => {
             }
         }
 
-        const resultado = await prisma.$transaction(async (tx) => {
+        const resultado = await transacao(async (tx) => {
+            await travarLinha(tx, "movimentacoes", id);
             const atual = await tx.movimentacao.findFirst({
                 where: { id, empresaId },
             });
@@ -270,14 +297,11 @@ router.patch("/:id", async (req, res) => {
                 throw new Error("Fornecedor/cliente antigo não encontrado");
             }
 
-            const saldoSemEfeitoAntigo =
-                Number(fornecedorAntigo.saldo) -
-                efeitoNoSaldo(atual.tipo, Number(atual.total));
-
-            await tx.fornecedorCliente.update({
-                where: { id: atual.fornecedorClienteId },
-                data: { saldo: saldoSemEfeitoAntigo },
-            });
+            await ajustarSaldo(
+                tx,
+                atual.fornecedorClienteId,
+                -efeitoNoSaldo(atual.tipo, decimalParaCentavos(atual.total)),
+            );
 
             const novoFornecedorClienteId =
                 fornecedorClienteId !== undefined
@@ -288,35 +312,27 @@ router.patch("/:id", async (req, res) => {
             // total sempre derivado: usa os valores enviados, caindo para os
             // atuais quando não informados.
             const novaQuantidade =
-                quantidade !== undefined
-                    ? Number(quantidade)
-                    : Number(atual.quantidade);
+                qtdEnviada ??
+                (atual.quantidade !== null ? decimalParaCentavos(atual.quantidade) : 0);
             const novoPreco =
-                preco !== undefined ? Number(preco) : Number(atual.preco);
-            if (
-                isNaN(novaQuantidade) ||
-                novaQuantidade <= 0 ||
-                isNaN(novoPreco) ||
-                novoPreco <= 0
-            ) {
+                precoEnviado ??
+                (atual.preco !== null ? decimalParaCentavos(atual.preco) : 0);
+            if (novaQuantidade <= 0 || novoPreco <= 0) {
                 throw new Error(
                     "Quantidade e preço são obrigatórios e devem ser maiores que zero",
                 );
             }
             const novoTotal = calcularTotal(novaQuantidade, novoPreco);
+            if (novoTotal > MAX_CENTAVOS) {
+                throw new Error(MSG_TOTAL_GRANDE);
+            }
 
-            // 2) aplica o efeito novo no saldo do fornecedor novo (relê o saldo,
-            // que pode ter mudado no passo 1 se for o mesmo fornecedor).
             const fornecedorNovo = await tx.fornecedorCliente.findFirst({
                 where: { id: novoFornecedorClienteId, empresaId },
             });
             if (!fornecedorNovo) {
                 throw new Error("Novo fornecedor/cliente não encontrado");
             }
-
-            const novoSaldo =
-                Number(fornecedorNovo.saldo) +
-                efeitoNoSaldo(novoTipo, novoTotal);
 
             // valida o novo produto (se enviado) antes de montar a atualização
             if (produtoId !== undefined) {
@@ -334,26 +350,29 @@ router.patch("/:id", async (req, res) => {
                 dados.fornecedorClienteId = novoFornecedorClienteId;
             if (produtoId !== undefined) dados.produtoId = Number(produtoId);
             if (tipo !== undefined) dados.tipo = tipo;
-            if (quantidade !== undefined) dados.quantidade = novaQuantidade;
-            if (preco !== undefined) dados.preco = novoPreco;
+            if (qtdEnviada !== undefined) dados.quantidade = centavosParaDecimal(novaQuantidade);
+            if (precoEnviado !== undefined) dados.preco = centavosParaDecimal(novoPreco);
             // total é recalculado no servidor e sempre persistido de forma coerente
-            dados.total = novoTotal;
+            dados.total = centavosParaDecimal(novoTotal);
             for (const campo of CAMPOS_OPCIONAIS) {
                 if (req.body[campo] !== undefined) {
                     dados[campo] = textoOuNull(req.body[campo]);
                 }
             }
 
+            // 2) aplica o efeito novo no saldo do fornecedor novo (atômico;
+            // funciona mesmo quando é o mesmo fornecedor do passo 1). Antes de
+            // regravar a movimentação, pelo mesmo motivo do POST.
+            const fornecedorClienteAtualizado = await ajustarSaldo(
+                tx,
+                novoFornecedorClienteId,
+                efeitoNoSaldo(novoTipo, novoTotal),
+            );
+
             const movimentacao = await tx.movimentacao.update({
                 where: { id },
                 data: dados,
             });
-
-            const fornecedorClienteAtualizado =
-                await tx.fornecedorCliente.update({
-                    where: { id: novoFornecedorClienteId },
-                    data: { saldo: novoSaldo },
-                });
 
             return { movimentacao, fornecedorCliente: fornecedorClienteAtualizado };
         });
@@ -367,7 +386,7 @@ router.patch("/:id", async (req, res) => {
         if (msg.includes("não encontrad")) {
             return res.status(404).json({ message: msg });
         }
-        if (msg.includes("obrigatóri")) {
+        if (msg.includes("obrigatóri") || msg === MSG_TOTAL_GRANDE) {
             return res.status(400).json({ message: msg });
         }
         return res
@@ -386,7 +405,8 @@ router.delete("/:id", async (req, res) => {
             return res.status(400).json({ message: "ID inválido" });
         }
 
-        const resultado = await prisma.$transaction(async (tx) => {
+        const resultado = await transacao(async (tx) => {
+            await travarLinha(tx, "movimentacoes", id);
             const movimentacao = await tx.movimentacao.findFirst({
                 where: { id, empresaId },
             });
@@ -402,19 +422,15 @@ router.delete("/:id", async (req, res) => {
             }
 
             // ao deletar, desfaz o efeito da movimentação no saldo
-            const novoSaldo =
-                Number(fornecedorCliente.saldo) -
-                efeitoNoSaldo(movimentacao.tipo, Number(movimentacao.total));
+            const fornecedorClienteAtualizado = await ajustarSaldo(
+                tx,
+                movimentacao.fornecedorClienteId,
+                -efeitoNoSaldo(movimentacao.tipo, decimalParaCentavos(movimentacao.total)),
+            );
 
             const movimentacaoDeletada = await tx.movimentacao.delete({
                 where: { id },
             });
-
-            const fornecedorClienteAtualizado =
-                await tx.fornecedorCliente.update({
-                    where: { id: movimentacao.fornecedorClienteId },
-                    data: { saldo: novoSaldo },
-                });
 
             return {
                 movimentacao: movimentacaoDeletada,

@@ -1,8 +1,31 @@
 import { Router } from "express";
 import { prisma } from "../../lib/prisma.js";
 import { getEmpresaId } from "../auth/middleware.js";
+import { transacao, travarLinha } from "../transacao.js";
+import {
+    parseCentavos,
+    centavosParaDecimal,
+    decimalParaCentavos,
+    MSG_VALOR_INVALIDO,
+} from "../valores.js";
 
 const router = Router();
+
+// Efeito de um lançamento no saldo do fornecedor/cliente, em centavos:
+// ENTRADA soma, SAIDA subtrai.
+function efeitoCentavos(tipo: string, centavos: number): number {
+    return tipo === "ENTRADA" ? centavos : -centavos;
+}
+
+// Ajusta o saldo de forma atômica no banco (UPDATE ... SET saldo = saldo + x).
+// Diferente de "ler, somar em JS e gravar", duas operações simultâneas no
+// mesmo cliente não sobrescrevem uma à outra.
+function ajustarSaldo(tx: any, fornecedorClienteId: number, deltaCentavos: number) {
+    return tx.fornecedorCliente.update({
+        where: { id: fornecedorClienteId },
+        data: { saldo: { increment: centavosParaDecimal(deltaCentavos) } },
+    });
+}
 
 // GET /lancamentos/filtros?clienteId=1&contaId=2&categoriaId=3&tipo=ENTRADA|SAIDA|TODOS
 router.get("/filtros", async (req, res) => {
@@ -242,10 +265,11 @@ router.post("/", async (req, res) => {
                 .json({ message: "Tipo inválido. Use ENTRADA ou SAIDA" });
         }
 
-        if (isNaN(Number(valor)) || Number(valor) <= 0) {
-            return res
-                .status(400)
-                .json({ message: "O valor deve ser um número maior que zero" });
+        const valorCentavos = parseCentavos(valor);
+        if (valorCentavos === null || valorCentavos <= 0) {
+            return res.status(400).json({
+                message: `Valor inválido: ${MSG_VALOR_INVALIDO}, maior que zero`,
+            });
         }
 
         const data = new Date(dataLancamento);
@@ -253,7 +277,7 @@ router.post("/", async (req, res) => {
             return res.status(400).json({ message: "Data inválida" });
         }
 
-        const resultado = await prisma.$transaction(async (tx) => {
+        const resultado = await transacao(async (tx) => {
             // todas as entidades referenciadas têm que pertencer à mesma empresa
             const fornecedorCliente = await tx.fornecedorCliente.findFirst({
                 where: { id: Number(fornecedorClienteId), empresaId },
@@ -276,11 +300,14 @@ router.post("/", async (req, res) => {
                 throw new Error("Categoria não encontrada");
             }
 
-            const saldoAtual = Number(fornecedorCliente.saldo);
-            const novoSaldo =
-                tipo === "ENTRADA"
-                    ? saldoAtual + Number(valor)
-                    : saldoAtual - Number(valor);
+            // O saldo é ajustado ANTES de gravar o lançamento: o UPDATE trava a
+            // linha do cliente logo de início, e uma operação simultânea no mesmo
+            // cliente espera esta terminar (em vez de as duas se travarem).
+            const fornecedorClienteAtualizado = await ajustarSaldo(
+                tx,
+                Number(fornecedorClienteId),
+                efeitoCentavos(tipo, valorCentavos),
+            );
 
             const lancamento = await tx.lancamento.create({
                 data: {
@@ -288,7 +315,7 @@ router.post("/", async (req, res) => {
                     empresaId,
                     fornecedorClienteId: Number(fornecedorClienteId),
                     tipo,
-                    valor: Number(valor),
+                    valor: centavosParaDecimal(valorCentavos),
                     contaId: Number(contaId),
                     classificacao: classificacao
                         ? String(classificacao).trim()
@@ -297,12 +324,6 @@ router.post("/", async (req, res) => {
                     observacao: observacao ?? null,
                 },
             });
-
-            const fornecedorClienteAtualizado =
-                await tx.fornecedorCliente.update({
-                    where: { id: Number(fornecedorClienteId) },
-                    data: { saldo: novoSaldo },
-                });
 
             return {
                 lancamento,
@@ -335,7 +356,8 @@ router.delete("/:id", async (req, res) => {
             return res.status(400).json({ message: "ID inválido" });
         }
 
-        const resultado = await prisma.$transaction(async (tx) => {
+        const resultado = await transacao(async (tx) => {
+            await travarLinha(tx, "lancamentos", id);
             const lancamento = await tx.lancamento.findFirst({
                 where: { id, empresaId },
             });
@@ -350,23 +372,19 @@ router.delete("/:id", async (req, res) => {
                 throw new Error("Fornecedor/cliente não encontrado");
             }
 
-            const saldoAtual = Number(fornecedorCliente.saldo);
-
             // ao deletar, desfaz o efeito do lançamento no saldo
-            const novoSaldo =
-                lancamento.tipo === "ENTRADA"
-                    ? saldoAtual - Number(lancamento.valor)
-                    : saldoAtual + Number(lancamento.valor);
+            const fornecedorClienteAtualizado = await ajustarSaldo(
+                tx,
+                lancamento.fornecedorClienteId,
+                -efeitoCentavos(
+                    lancamento.tipo,
+                    decimalParaCentavos(lancamento.valor),
+                ),
+            );
 
             const lancamentoDeletado = await tx.lancamento.delete({
                 where: { id },
             });
-
-            const fornecedorClienteAtualizado =
-                await tx.fornecedorCliente.update({
-                    where: { id: lancamento.fornecedorClienteId },
-                    data: { saldo: novoSaldo },
-                });
 
             return {
                 lancamento: lancamentoDeletado,
@@ -414,13 +432,15 @@ router.patch("/:id", async (req, res) => {
                 .json({ message: "Tipo inválido. Use ENTRADA ou SAIDA" });
         }
 
+        const valorCentavos =
+            valor !== undefined ? parseCentavos(valor) : undefined;
         if (
-            valor !== undefined &&
-            (isNaN(Number(valor)) || Number(valor) <= 0)
+            valorCentavos !== undefined &&
+            (valorCentavos === null || valorCentavos <= 0)
         ) {
-            return res
-                .status(400)
-                .json({ message: "O valor deve ser um número maior que zero" });
+            return res.status(400).json({
+                message: `Valor inválido: ${MSG_VALOR_INVALIDO}, maior que zero`,
+            });
         }
 
         if (
@@ -451,7 +471,8 @@ router.patch("/:id", async (req, res) => {
             }
         }
 
-        const resultado = await prisma.$transaction(async (tx) => {
+        const resultado = await transacao(async (tx) => {
+            await travarLinha(tx, "lancamentos", id);
             const lancamentoAtual = await tx.lancamento.findFirst({
                 where: { id, empresaId },
             });
@@ -467,16 +488,14 @@ router.patch("/:id", async (req, res) => {
             }
 
             // 1) desfaz o efeito do lançamento atual no saldo do fornecedor antigo
-            const saldoAntigoAtual = Number(fornecedorAntigo.saldo);
-            const saldoSemLancamentoAntigo =
-                lancamentoAtual.tipo === "ENTRADA"
-                    ? saldoAntigoAtual - Number(lancamentoAtual.valor)
-                    : saldoAntigoAtual + Number(lancamentoAtual.valor);
-
-            await tx.fornecedorCliente.update({
-                where: { id: lancamentoAtual.fornecedorClienteId },
-                data: { saldo: saldoSemLancamentoAntigo },
-            });
+            await ajustarSaldo(
+                tx,
+                lancamentoAtual.fornecedorClienteId,
+                -efeitoCentavos(
+                    lancamentoAtual.tipo,
+                    decimalParaCentavos(lancamentoAtual.valor),
+                ),
+            );
 
             const novoFornecedorClienteId =
                 fornecedorClienteId !== undefined
@@ -486,10 +505,8 @@ router.patch("/:id", async (req, res) => {
             const novoTipo =
                 tipo !== undefined ? tipo : lancamentoAtual.tipo;
 
-            const novoValor =
-                valor !== undefined
-                    ? Number(valor)
-                    : Number(lancamentoAtual.valor);
+            const novoValorCentavos =
+                valorCentavos ?? decimalParaCentavos(lancamentoAtual.valor);
 
             // valida propriedade das novas referências (todas da mesma empresa)
             const fornecedorNovo = await tx.fornecedorCliente.findFirst({
@@ -517,18 +534,6 @@ router.patch("/:id", async (req, res) => {
                 }
             }
 
-            // 2) aplica o efeito do lançamento novo no saldo do fornecedor novo.
-            // Relê o saldo (pode ter sido alterado no passo 1, se for o mesmo).
-            const fornecedorNovoAtual = await tx.fornecedorCliente.findFirst({
-                where: { id: novoFornecedorClienteId, empresaId },
-            });
-            const saldoNovoAtual = Number(fornecedorNovoAtual!.saldo);
-
-            const novoSaldo =
-                novoTipo === "ENTRADA"
-                    ? saldoNovoAtual + novoValor
-                    : saldoNovoAtual - novoValor;
-
             const dadosAtualizacao: any = {};
 
             if (dataConvertida !== undefined) {
@@ -540,8 +545,8 @@ router.patch("/:id", async (req, res) => {
             if (tipo !== undefined) {
                 dadosAtualizacao.tipo = tipo;
             }
-            if (valor !== undefined) {
-                dadosAtualizacao.valor = Number(valor);
+            if (valorCentavos !== undefined && valorCentavos !== null) {
+                dadosAtualizacao.valor = centavosParaDecimal(valorCentavos);
             }
             if (contaId !== undefined) {
                 dadosAtualizacao.contaId = Number(contaId);
@@ -559,16 +564,19 @@ router.patch("/:id", async (req, res) => {
                 dadosAtualizacao.observacao = observacao;
             }
 
+            // 2) aplica o efeito do lançamento novo no saldo do fornecedor novo
+            // (atômico; funciona mesmo quando é o mesmo fornecedor do passo 1).
+            // Feito antes de regravar o lançamento, pelo mesmo motivo do POST.
+            const fornecedorClienteAtualizado = await ajustarSaldo(
+                tx,
+                novoFornecedorClienteId,
+                efeitoCentavos(novoTipo, novoValorCentavos),
+            );
+
             const lancamentoAtualizado = await tx.lancamento.update({
                 where: { id },
                 data: dadosAtualizacao,
             });
-
-            const fornecedorClienteAtualizado =
-                await tx.fornecedorCliente.update({
-                    where: { id: novoFornecedorClienteId },
-                    data: { saldo: novoSaldo },
-                });
 
             return {
                 lancamento: lancamentoAtualizado,
