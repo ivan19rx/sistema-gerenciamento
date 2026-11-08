@@ -13,6 +13,8 @@ import lancamentosRouter from "./routes/lancamentos.js";
 import movimentacoesRouter from "./routes/movimentacoes.js";
 import produtosRouter from "./routes/produtos.js";
 import registrosLoginRouter from "./routes/registrosLogin.js";
+import registrosRequisicoesRouter from "./routes/registrosRequisicoes.js";
+import { registrarRequisicoes, iniciarRegistroRequisicoes } from "./registroRequisicoes.js";
 import { swaggerSpec } from "./docs/swagger.js";
 import { autenticar, apenasAdmin, resolverEmpresa } from "./auth/middleware.js";
 import {
@@ -47,6 +49,11 @@ app.use(express.json({ limit: limiteCorpoJson }));
 // Proteção contra poluição de parâmetros (query/body duplicados).
 app.use(hpp());
 
+// Registro de requisições (para o admin). Antes do rate-limit para também
+// registrar as requisições bloqueadas por excesso (429).
+app.use(registrarRequisicoes);
+iniciarRegistroRequisicoes();
+
 // Rate limiting global para todas as rotas.
 app.use(limitadorGlobal);
 
@@ -64,6 +71,7 @@ app.use("/empresas", autenticar, apenasAdmin, empresasRouter);
 
 // Histórico de logins (com dispositivo): somente o administrador global
 app.use("/registros-login", autenticar, apenasAdmin, registrosLoginRouter);
+app.use("/registros-requisicoes", autenticar, apenasAdmin, registrosRequisicoesRouter);
 
 // Rotas de dados: exigem autenticação e resolução do tenant (empresa)
 app.use("/contas", autenticar, resolverEmpresa, contasRouter);

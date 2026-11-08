@@ -24,6 +24,10 @@ const swaggerSpec = {
             name: "Registros de login",
             description: "Histórico de tentativas de login com o dispositivo de origem (somente admin)",
         },
+        {
+            name: "Registros de requisições",
+            description: "Histórico de todas as requisições da API, exceto login (somente admin)",
+        },
         { name: "Contas", description: "Tipos de conta" },
         { name: "Categorias", description: "Categorias de lançamentos" },
         {
@@ -241,6 +245,31 @@ const swaggerSpec = {
                 ],
                 responses: {
                     200: { description: "{ registros, total, limite, resumo: { sucesso, falhas, porDispositivo } } (total e resumo contam todos os que batem com o filtro)" },
+                    400: { $ref: "#/components/responses/Validacao" },
+                    403: { description: "Acesso restrito ao administrador" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+        },
+        "/registros-requisicoes": {
+            get: {
+                tags: ["Registros de requisições"],
+                summary: "Lista requisições feitas à API, mais recentes primeiro (somente admin)",
+                description:
+                    "Grava método, caminho, filtros usados (sem senhas/tokens), status, tempo de resposta, usuário, empresa, IP e aparelho. Não grava o corpo das requisições. Login e as próprias telas de registros ficam de fora. Registros mais antigos que REQUISICOES_RETENCAO_DIAS (padrão 90) são apagados automaticamente.",
+                parameters: [
+                    { name: "de", in: "query", required: false, description: "Início do período (instante ISO 8601)", schema: { type: "string", format: "date-time" } },
+                    { name: "ate", in: "query", required: false, description: "Fim do período (instante ISO 8601)", schema: { type: "string", format: "date-time" } },
+                    { name: "metodo", in: "query", required: false, description: "Método HTTP, ou ALTERACOES para tudo menos GET", schema: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "ALTERACOES"] } },
+                    { name: "status", in: "query", required: false, description: "2xx, 3xx, 4xx, 5xx, erros (4xx e 5xx) ou um código exato", schema: { type: "string" } },
+                    { name: "tipoAcesso", in: "query", required: false, description: "Quem fez", schema: { type: "string", enum: ["ADMIN", "EMPRESA", "ANONIMO"] } },
+                    { name: "empresaId", in: "query", required: false, description: "Somente requisições desta empresa", schema: { type: "integer" } },
+                    { name: "busca", in: "query", required: false, description: "Trecho do caminho, dos filtros ou do IP", schema: { type: "string" } },
+                    { name: "lentas", in: "query", required: false, description: "true: só as que levaram 1 s ou mais", schema: { type: "string", enum: ["true"] } },
+                    { name: "limite", in: "query", required: false, description: "Máximo de registros (padrão 500, máx. 2000)", schema: { type: "integer" } },
+                ],
+                responses: {
+                    200: { description: "{ registros, total, limite, resumo: { porClasse, duracaoMediaMs } }" },
                     400: { $ref: "#/components/responses/Validacao" },
                     403: { description: "Acesso restrito ao administrador" },
                     500: { $ref: "#/components/responses/ErroInterno" },

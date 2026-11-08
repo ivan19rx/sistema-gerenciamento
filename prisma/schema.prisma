@@ -39,6 +39,7 @@ model Admin {
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
 
   registrosLogin RegistroLogin[]
+  requisicoes    RegistroRequisicao[]
 
   @@map("admins")
 }
@@ -65,6 +66,7 @@ model Empresa {
   lancamentos          Lancamento[]
   movimentacoes        Movimentacao[]
   registrosLogin       RegistroLogin[]
+  requisicoes          RegistroRequisicao[]
 
   @@map("empresas")
 }
@@ -224,4 +226,38 @@ model RegistroLogin {
   @@index([criadoEm])
   @@index([empresaId, criadoEm])
   @@map("registros_login")
+}
+
+// Cada requisição feita à API (exceto login, que tem registro próprio, e as
+// telas de consulta dos próprios registros). Gravado em lote, depois da
+// resposta. Não guarda o corpo da requisição (pode ter dados sensíveis).
+model RegistroRequisicao {
+  id              Int              @id @default(autoincrement())
+  metodo          String           @db.VarChar(10)
+  // caminho real (ex: /lancamentos/12) e o modelo dele (ex: /lancamentos/:id)
+  caminho         String           @db.VarChar(255)
+  rota            String           @db.VarChar(255)
+  consulta        String?          @db.VarChar(500)
+  status          Int              @db.SmallInt
+  duracaoMs       Int              @map("duracao_ms")
+
+  // quem fez: null quando a requisição não estava autenticada
+  tipoAcesso      TipoAcesso?      @map("tipo_acesso")
+  adminId         Int?             @map("admin_id")
+  // empresa alvo (a própria, ou a que o admin estava visualizando)
+  empresaId       Int?             @map("empresa_id")
+  admin           Admin?           @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  empresa         Empresa?         @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+
+  ip              String?          @db.VarChar(64)
+  tipoDispositivo TipoDispositivo  @map("tipo_dispositivo")
+  sistema         String?          @db.VarChar(64)
+  navegador       String?          @db.VarChar(64)
+
+  criadoEm        DateTime         @default(now()) @map("criado_em")
+
+  @@index([criadoEm])
+  @@index([empresaId, criadoEm])
+  @@index([status, criadoEm])
+  @@map("registros_requisicoes")
 }
