@@ -256,7 +256,7 @@ const swaggerSpec = {
                 tags: ["Registros de requisições"],
                 summary: "Lista requisições feitas à API, mais recentes primeiro (somente admin)",
                 description:
-                    "Grava método, caminho, filtros usados (sem senhas/tokens), status, tempo de resposta, usuário, empresa, IP e aparelho. Não grava o corpo das requisições. Login e as próprias telas de registros ficam de fora. Registros mais antigos que REQUISICOES_RETENCAO_DIAS (padrão 90) são apagados automaticamente.",
+                    "Grava método, caminho, filtros usados (sem senhas/tokens), status, tempo de resposta, usuário, empresa, IP e aparelho. Não grava o corpo das requisições. Login e as próprias telas de registros ficam de fora. Consultas (GET/HEAD) bem-sucedidas e rápidas (menos de 1 s) não são registradas, a menos que REQUISICOES_REGISTRAR_CONSULTAS=true. Registros mais antigos que REQUISICOES_RETENCAO_DIAS (padrão 90) são apagados automaticamente.",
                 parameters: [
                     { name: "de", in: "query", required: false, description: "Início do período (instante ISO 8601)", schema: { type: "string", format: "date-time" } },
                     { name: "ate", in: "query", required: false, description: "Fim do período (instante ISO 8601)", schema: { type: "string", format: "date-time" } },

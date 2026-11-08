@@ -12,6 +12,11 @@ import { identificarDispositivo, ipDaRequisicao } from "./dispositivo.js";
 // - Não guarda o corpo da requisição (pode ter senha e dados pessoais) e tira
 //   da consulta parâmetros sensíveis.
 // - Apaga registros mais antigos que REQUISICOES_RETENCAO_DIAS (padrão 90).
+// - Consultas (GET/HEAD) que deram certo e foram rápidas NÃO são registradas:
+//   são a grande maioria e dizem pouco. Continuam registradas as alterações
+//   (POST/PUT/PATCH/DELETE), as consultas com erro (4xx/5xx: acesso negado,
+//   token vencido, rota inexistente) e as lentas. REQUISICOES_REGISTRAR_CONSULTAS=true
+//   volta a registrar todas.
 
 // Fora do registro: login (tem registro próprio), documentação, preflight de
 // CORS e as telas de consulta dos registros (abrir a tela não vira registro).
@@ -21,6 +26,20 @@ const PARAMS_SENSIVEIS = /^(senha|password|token|authorization|secret)$/i;
 const INTERVALO_MS = 3000;
 const LOTE_MAXIMO = 200;
 const FILA_MAXIMA = 5000; // se o banco ficar fora, descarta em vez de estourar a memória
+
+const LENTA_MS = 1000;
+const METODOS_CONSULTA = new Set(["GET", "HEAD"]);
+
+// Decide se a requisição entra no registro (depois de saber status e tempo).
+export function deveRegistrar(
+    metodo: string,
+    status: number,
+    duracaoMs: number,
+    registrarConsultas = process.env.REQUISICOES_REGISTRAR_CONSULTAS === "true",
+): boolean {
+    if (registrarConsultas || !METODOS_CONSULTA.has(metodo)) return true;
+    return status >= 400 || duracaoMs >= LENTA_MS;
+}
 
 type Item = Prisma.RegistroRequisicaoCreateManyInput;
 let fila: Item[] = [];
@@ -65,6 +84,8 @@ export function registrarRequisicoes(req: Request, res: Response, next: NextFunc
     const inicio = process.hrtime.bigint();
     res.on("finish", () => {
         try {
+            const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+            if (!deveRegistrar(req.method, res.statusCode, duracaoMs)) return;
             const auth = req.auth;
             const userAgent = req.get("user-agent");
             const dispositivo = identificarDispositivo(userAgent, undefined);
@@ -74,7 +95,7 @@ export function registrarRequisicoes(req: Request, res: Response, next: NextFunc
                 rota: modeloDaRota(caminho).slice(0, 255),
                 consulta: limparConsulta(req.originalUrl),
                 status: res.statusCode,
-                duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6),
+                duracaoMs,
                 tipoAcesso: auth?.role ?? null,
                 adminId: auth?.role === "ADMIN" ? auth.id : null,
                 empresaId: req.empresaId ?? (auth?.role === "EMPRESA" ? auth.id : null),
