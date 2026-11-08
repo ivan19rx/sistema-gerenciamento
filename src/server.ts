@@ -12,6 +12,7 @@ import fornecedoresClientesRouter from "./routes/fornecedoresClientes.js";
 import lancamentosRouter from "./routes/lancamentos.js";
 import movimentacoesRouter from "./routes/movimentacoes.js";
 import produtosRouter from "./routes/produtos.js";
+import registrosLoginRouter from "./routes/registrosLogin.js";
 import { swaggerSpec } from "./docs/swagger.js";
 import { autenticar, apenasAdmin, resolverEmpresa } from "./auth/middleware.js";
 import {
@@ -60,6 +61,9 @@ app.use("/auth", limitadorAutenticacao, authRouter);
 
 // Gestão de empresas: somente o administrador global
 app.use("/empresas", autenticar, apenasAdmin, empresasRouter);
+
+// Histórico de logins (com dispositivo): somente o administrador global
+app.use("/registros-login", autenticar, apenasAdmin, registrosLoginRouter);
 
 // Rotas de dados: exigem autenticação e resolução do tenant (empresa)
 app.use("/contas", autenticar, resolverEmpresa, contasRouter);

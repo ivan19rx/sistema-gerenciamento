@@ -38,6 +38,8 @@ model Admin {
   criadoEm     DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
 
+  registrosLogin RegistroLogin[]
+
   @@map("admins")
 }
 
@@ -62,6 +64,7 @@ model Empresa {
   produtos             Produto[]
   lancamentos          Lancamento[]
   movimentacoes        Movimentacao[]
+  registrosLogin       RegistroLogin[]
 
   @@map("empresas")
 }
@@ -176,4 +179,49 @@ model Movimentacao {
 
   @@index([empresaId, dataMovimento])
   @@map("movimentacoes")
+}
+
+enum TipoAcesso {
+  ADMIN
+  EMPRESA
+}
+
+enum TipoDispositivo {
+  COMPUTADOR
+  CELULAR
+  TABLET
+  DESCONHECIDO
+}
+
+// Cada tentativa de login (com sucesso ou não), com o dispositivo de origem.
+// Consultado pelo administrador. Admin/empresa ficam como SetNull para o
+// histórico sobreviver à exclusão do cadastro; nomeUsuario guarda o nome da
+// época para a linha continuar legível.
+model RegistroLogin {
+  id              Int             @id @default(autoincrement())
+  tipoAcesso      TipoAcesso      @map("tipo_acesso")
+  sucesso         Boolean
+  // motivo da falha (null quando deu certo)
+  motivo          String?         @db.VarChar(100)
+  // o que foi digitado no campo de usuário (CNPJ ou e-mail)
+  identificador   String          @db.VarChar(191)
+  nomeUsuario     String?         @map("nome_usuario") @db.VarChar(191)
+
+  adminId         Int?            @map("admin_id")
+  empresaId       Int?            @map("empresa_id")
+  admin           Admin?          @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  empresa         Empresa?        @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+
+  ip              String?         @db.VarChar(64)
+  userAgent       String?         @map("user_agent") @db.Text
+  tipoDispositivo TipoDispositivo @map("tipo_dispositivo")
+  sistema         String?         @db.VarChar(64)
+  navegador       String?         @db.VarChar(64)
+  modelo          String?         @db.VarChar(100)
+
+  criadoEm        DateTime        @default(now()) @map("criado_em")
+
+  @@index([criadoEm])
+  @@index([empresaId, criadoEm])
+  @@map("registros_login")
 }

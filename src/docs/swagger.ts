@@ -20,6 +20,10 @@ const swaggerSpec = {
     tags: [
         { name: "Autenticação", description: "Login de empresa e administrador" },
         { name: "Empresas", description: "Cadastro de empresas (somente admin)" },
+        {
+            name: "Registros de login",
+            description: "Histórico de tentativas de login com o dispositivo de origem (somente admin)",
+        },
         { name: "Contas", description: "Tipos de conta" },
         { name: "Categorias", description: "Categorias de lançamentos" },
         {
@@ -215,6 +219,30 @@ const swaggerSpec = {
                     200: { description: "Autenticado (retorna token)" },
                     400: { $ref: "#/components/responses/Validacao" },
                     401: { description: "Credenciais inválidas" },
+                    500: { $ref: "#/components/responses/ErroInterno" },
+                },
+            },
+        },
+        "/registros-login": {
+            get: {
+                tags: ["Registros de login"],
+                summary: "Lista tentativas de login, mais recentes primeiro (somente admin)",
+                description:
+                    "Cada login (com sucesso ou não) é gravado com IP, tipo de aparelho, sistema, navegador e modelo. O motivo da falha só aparece aqui; a resposta do login continua genérica.",
+                parameters: [
+                    { name: "de", in: "query", required: false, description: "Início do período (instante ISO 8601)", schema: { type: "string", format: "date-time" } },
+                    { name: "ate", in: "query", required: false, description: "Fim do período (instante ISO 8601)", schema: { type: "string", format: "date-time" } },
+                    { name: "sucesso", in: "query", required: false, description: "Filtra pelo resultado", schema: { type: "string", enum: ["true", "false"] } },
+                    { name: "tipoAcesso", in: "query", required: false, description: "Tipo de usuário", schema: { type: "string", enum: ["ADMIN", "EMPRESA"] } },
+                    { name: "tipoDispositivo", in: "query", required: false, description: "Tipo de aparelho", schema: { type: "string", enum: ["COMPUTADOR", "CELULAR", "TABLET", "DESCONHECIDO"] } },
+                    { name: "empresaId", in: "query", required: false, description: "Somente logins desta empresa", schema: { type: "integer" } },
+                    { name: "busca", in: "query", required: false, description: "Trecho do usuário, nome, IP, sistema, navegador ou modelo", schema: { type: "string" } },
+                    { name: "limite", in: "query", required: false, description: "Máximo de registros (padrão 500, máx. 2000)", schema: { type: "integer" } },
+                ],
+                responses: {
+                    200: { description: "{ registros, total, limite, resumo: { sucesso, falhas, porDispositivo } } (total e resumo contam todos os que batem com o filtro)" },
+                    400: { $ref: "#/components/responses/Validacao" },
+                    403: { description: "Acesso restrito ao administrador" },
                     500: { $ref: "#/components/responses/ErroInterno" },
                 },
             },

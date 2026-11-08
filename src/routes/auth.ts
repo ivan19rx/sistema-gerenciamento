@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../../lib/prisma.js";
 import { compararSenha } from "../auth/senha.js";
 import { assinarToken } from "../auth/jwt.js";
+import { registrarLogin } from "../registroLogin.js";
 
 const router = Router();
 
@@ -36,17 +37,27 @@ router.post("/login", async (req, res) => {
             omit: { senha: false },
         });
 
-        // Mensagem genérica: não revela se o identificador existe.
-        if (!empresa || !empresa.ativo) {
+        const nomeEmpresa = empresa?.nomeFantasia || empresa?.razaoSocial || null;
+        const base = { tipoAcesso: "EMPRESA" as const, identificador: id };
+
+        // Mensagem genérica: não revela se o identificador existe. O motivo
+        // real fica só no registro de login (visto pelo administrador).
+        if (!empresa) {
+            await registrarLogin(req, { ...base, sucesso: false, motivo: "Usuário não encontrado" });
             return res.status(401).json({ message: "Credenciais inválidas" });
         }
 
         const ok = await compararSenha(String(senha), empresa.senha);
-        if (!ok) {
+        if (!ok || !empresa.ativo) {
+            await registrarLogin(req, {
+                ...base, sucesso: false, empresaId: empresa.id, nomeUsuario: nomeEmpresa,
+                motivo: !ok ? "Senha incorreta" : "Cadastro inativo",
+            });
             return res.status(401).json({ message: "Credenciais inválidas" });
         }
 
         const token = assinarToken({ id: empresa.id, role: "EMPRESA" });
+        await registrarLogin(req, { ...base, sucesso: true, empresaId: empresa.id, nomeUsuario: nomeEmpresa });
 
         return res.status(200).json({
             token,
@@ -92,16 +103,24 @@ router.post("/admin/login", async (req, res) => {
             omit: { senha: false },
         });
 
-        if (!admin || !admin.ativo) {
+        const base = { tipoAcesso: "ADMIN" as const, identificador: id };
+
+        if (!admin) {
+            await registrarLogin(req, { ...base, sucesso: false, motivo: "Usuário não encontrado" });
             return res.status(401).json({ message: "Credenciais inválidas" });
         }
 
         const ok = await compararSenha(String(senha), admin.senha);
-        if (!ok) {
+        if (!ok || !admin.ativo) {
+            await registrarLogin(req, {
+                ...base, sucesso: false, adminId: admin.id, nomeUsuario: admin.email,
+                motivo: !ok ? "Senha incorreta" : "Cadastro inativo",
+            });
             return res.status(401).json({ message: "Credenciais inválidas" });
         }
 
         const token = assinarToken({ id: admin.id, role: "ADMIN" });
+        await registrarLogin(req, { ...base, sucesso: true, adminId: admin.id, nomeUsuario: admin.email });
 
         return res.status(200).json({
             token,
